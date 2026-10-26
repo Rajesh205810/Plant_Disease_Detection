@@ -1,15 +1,17 @@
 """Plant Disease Detection - Streamlit app.
 
 Run:  streamlit run app.py
-Needs: model.h5 in the same folder as this file.
+Needs: model.h5 in the same folder as this file (or downloads automatically from Google Drive).
 """
 import base64
 import io
 import json
+import os
 import urllib.error
 import urllib.request
 from pathlib import Path
 
+import gdown
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -35,13 +37,19 @@ ADVISOR_PROMPT = (
 )
 
 st.set_page_config(page_title="Plant Disease Detection", page_icon="🌿", layout="centered",
-                   initial_sidebar_state="collapsed")
+                    initial_sidebar_state="collapsed")
 
 
 # --------------------------------------------------------------------------- model
-@st.cache_resource(show_spinner="Loading AI model (first run only)...")
+@st.cache_resource(show_spinner="Loading AI model (downloading if needed)...")
 def load_model():
     import tensorflow as tf  # imported lazily so the page appears instantly
+
+    # Automatically download model from Google Drive if missing (bypasses GitHub 25MB limit)
+    if not MODEL_PATH.exists():
+        st.info("📥 Downloading model from Google Drive (first-time cloud boot, ~89MB)... Please wait.")
+        gdrive_url = "https://drive.google.com/uc?id=1wuHFBZs-76upHrPybchq4LZbh8khOTAP&export=download"
+        gdown.download(gdrive_url, str(MODEL_PATH), quiet=False)
 
     return tf.keras.models.load_model(MODEL_PATH, compile=False)
 
@@ -180,10 +188,6 @@ mode = PREPROCESS_MODES[mode_label]
 # ------------------------------------------------------------------ main page
 hero_and_crops()
 
-if not MODEL_PATH.exists():
-    st.error(f"`model.h5` was not found. Put it in the same folder as app.py:\n\n`{BASE_DIR}`")
-    st.stop()
-
 tab_up, tab_cam = st.tabs(["📁 Upload photo", "📷 Use camera"])
 with tab_up:
     uploaded = st.file_uploader("Choose a leaf image", type=["jpg", "jpeg", "png", "webp"],
@@ -257,17 +261,17 @@ label = {"none": "✅ Healthy leaf - no treatment needed",
 st.markdown(f'<div class="banner b-{severity}">{label}</div>', unsafe_allow_html=True)
 st.markdown(f'<div class="card"><b>What it is</b><br>{info["cause"]}</div>', unsafe_allow_html=True)
 
-t_sym, t_treat, t_prev = st.tabs(["🔍 Symptoms", "💊 Treatment", "🛡️ Prevention"])
+t_sym, t_treat, t_prev = st.tabs(["🔍 Symptoms", "💊 Treatment & Remedies", "🛡️ Prevention"])
 with t_sym:
     bullets(info["symptoms"])
 with t_treat:
-    st.markdown("**Cultural / organic steps**")
+    st.markdown("🌿 **Home / Organic Remedies**")
     bullets(info["cultural"])
     if info["chemical"]:
-        st.markdown("**Chemical options**")
+        st.markdown("💊 **Commercial Treatment & Dosages**")
         bullets(info["chemical"])
-        st.caption("Always follow the product label for dose, interval and protective clothing, and use "
-                   "only products registered for tomato/potato in your country.")
+        st.markdown("🛒 **Local Store / Online Search Tip:** Search the medicine name above on agricultural supply stores or delivery apps (like Coupang or local garden supply centers) to find available brands easily.")
+        st.caption("Always follow the product label for exact safety precautions, mixing ratios, and local agricultural regulations.")
 with t_prev:
     bullets(info["prevention"])
 
