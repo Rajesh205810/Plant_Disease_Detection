@@ -1,0 +1,5 @@
+streamlit>=1.40
+tensorflow>=2.18
+Pillow
+numpy
+pandas
