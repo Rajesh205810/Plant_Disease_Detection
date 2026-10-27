@@ -266,7 +266,7 @@ with st.sidebar:
     if entered_password == "Rajesh444":
         st.success("Access Granted! 🎉")
         st.markdown(
-            "[🔗 Open GitHub Repository](https://github.com/YOUR_USERNAME/YOUR_REPOSITORY)"
+            "[🔗 Open GitHub Repository](https://github.com/Rajesh205810/Plant_Disease_Detection)"
         )
     elif entered_password:
         st.error("Incorrect password. Try again.")
