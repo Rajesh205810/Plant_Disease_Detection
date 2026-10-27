@@ -188,4 +188,193 @@ CSS = """
 .solution-box {background: #f1f8e9; border: 2px solid #aed581; border-radius: 16px; padding: 20px; margin: 16px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.03);}
 .solution-box h3 {color: #2e7d32; margin-top: 0; font-size: 1.25rem;}
 .stat {text-align: center; border-radius: 16px; padding: 14px; background: #ffffff; border: 2px solid #c8e6c9; box-shadow: 0 4px 10px rgba(0,0,0,0.03);}
-.stat small {color: #558b2f; display: block; font-weight: 600;} .stat b
+
+.stat b {font-size: 1.3rem; color: #1b5e20;}
+.foot {text-align: center; color: #7f8c8d; font-size: .85rem; margin-top: 32px;}
+</style>
+"""
+
+TOMATO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+<circle cx="50" cy="56" r="34" fill="#e53935"/>
+<ellipse cx="38" cy="42" rx="9" ry="5" fill="#ff8a80" opacity=".6" transform="rotate(-30 38 42)"/>
+<path d="M50 24 L43 14 L50 19 L57 14 Z M50 24 L33 24 L44 30 Z M50 24 L67 24 L56 30 Z M50 24 L38 34 L48 30 Z M50 24 L62 34 L52 30 Z" fill="#2e7d32"/>
+<rect x="48" y="10" width="4" height="12" rx="2" fill="#1b5e20"/>
+</svg>"""
+
+POTATO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+<path d="M18 58 C14 36 34 22 56 26 C78 30 90 46 82 66 C74 84 40 88 26 76 C21 72 19 66 18 58 Z" fill="#c8923f"/>
+<path d="M30 40 C40 30 58 30 70 38" stroke="#e6b868" stroke-width="4" fill="none" stroke-linecap="round" opacity=".7"/>
+<circle cx="40" cy="58" r="2.6" fill="#8d5a1e"/>
+<circle cx="58" cy="52" r="2.6" fill="#8d5a1e"/>
+<circle cx="66" cy="68" r="2.6" fill="#8d5a1e"/>
+<circle cx="46" cy="72" r="2.6" fill="#8d5a1e"/>
+<circle cx="30" cy="62" r="2.2" fill="#8d5a1e"/>
+</svg>"""
+
+
+def crop_visual(name: str, svg: str) -> str:
+    for ext in ("jpg", "jpeg", "png", "webp"):
+        p = BASE_DIR / "images" / f"{name}.{ext}"
+        if p.exists():
+            b64 = base64.b64encode(p.read_bytes()).decode()
+            mime = "image/jpeg" if ext in ("jpg", "jpeg") else f"image/{ext}"
+            return f'<img src="data:{mime};base64,{b64}">'
+    return svg
+
+
+def hero_and_crops():
+    st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="hero"><h1>🌿 Plant Disease Detection</h1>'
+        '<p>Upload a leaf photo for AI diagnosis and plant care advice</p></div>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        f'<div class="crops">'
+        f'<div class="crop">{crop_visual("tomato", TOMATO_SVG)}'
+        f'<b>Tomato</b><span>Diseases + Healthy</span></div>'
+        f'<div class="crop">{crop_visual("potato", POTATO_SVG)}'
+        f'<b>Potato</b><span>Diseases + Healthy</span></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ------------------------------ Sidebar and repository password
+with st.sidebar:
+    st.header("⚙️ Settings")
+
+    threshold = st.slider(
+        "Minimum confidence", 40, 95, 70, 5, format="%d%"
+    ) / 100
+
+    with st.expander("Advanced"):
+        mode_label = st.selectbox(
+            "Image scaling used in training",
+            list(PREPROCESS_MODES),
+            help="Must match how the model was trained.",
+        )
+
+    st.divider()
+    st.subheader("📁 Project Code Access")
+    st.markdown("Enter password to unlock the repository link:")
+
+    entered_password = st.text_input(
+        "Password", type="password", key="git_pass"
+    )
+
+    if entered_password == "Rajesh444":
+        st.success("Access Granted! 🎉")
+        st.markdown(
+            "[🔗 Open GitHub Repository](https://github.com/YOUR_USERNAME/YOUR_REPOSITORY)"
+        )
+    elif entered_password:
+        st.error("Incorrect password. Try again.")
+
+
+mode = PREPROCESS_MODES[mode_label]
+
+
+# ------------------------------ Image prediction
+def show_prediction(image_file):
+    try:
+        image_bytes = image_file.getvalue()
+
+        with st.spinner("Analyzing your plant leaf..."):
+            probabilities = predict(image_bytes, mode)
+
+        if len(probabilities) != len(CLASS_NAMES):
+            st.error(
+                "The number of model outputs does not match CLASS_NAMES. "
+                "Please check disease_info.py and model.h5."
+            )
+            return
+
+        index = int(np.argmax(probabilities))
+        confidence = probabilities[index]
+        class_name = CLASS_NAMES[index]
+
+        st.subheader("🔍 Diagnosis Results")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.image(
+                Image.open(io.BytesIO(image_bytes)),
+                caption="Your leaf",
+                use_container_width=True,
+            )
+
+        with col2:
+            st.metric("Confidence", f"{confidence:.1%}")
+            st.progress(float(confidence))
+
+            if confidence < threshold:
+                st.warning(
+                    "Low confidence. Try a clearer image with good lighting."
+                )
+            else:
+                st.success(f"Prediction: {pretty(class_name)}")
+
+        st.subheader("📊 Top Predictions")
+
+        for i in np.argsort(probabilities)[::-1][:3]:
+            st.write(
+                f"**{pretty(CLASS_NAMES[i])}** — {probabilities[i]:.1%}"
+            )
+
+        solution = DETAILED_SOLUTIONS.get(class_name)
+
+        if solution:
+            st.subheader("🌱 Recommended Care")
+            st.markdown(f"### {solution['title']}")
+
+            st.markdown("**Immediate action**")
+            st.write(solution["action_advice"])
+
+            st.markdown("**Commercial treatment**")
+            st.write(solution["commercial"])
+
+            st.markdown("**Organic care**")
+            st.write(solution["organic"])
+
+            st.markdown("**Expert advice**")
+            st.write(solution["expert"])
+
+            st.caption(
+                "Confirm the diagnosis before treatment. Follow pesticide "
+                "labels and local agricultural guidance."
+            )
+        else:
+            info = DISEASE_INFO.get(class_name)
+
+            st.subheader("🌿 Disease Information")
+            if info:
+                st.write(info)
+            else:
+                st.info("No detailed advice is available for this class yet.")
+
+    except Exception as exc:
+        st.error(f"Unable to analyze the image: {exc}")
+
+
+# ------------------------------ Main page
+hero_and_crops()
+
+tab_up, tab_cam = st.tabs(["📁 Upload Photo", "📷 Use Camera"])
+
+with tab_up:
+    uploaded = st.file_uploader(
+        "Choose a leaf image",
+        type=["jpg", "jpeg", "png"],
+        key="leaf_upload",
+    )
+
+    if uploaded is not None:
+        show_prediction(uploaded)
+
+with tab_cam:
+    camera_photo = st.camera_input("Take a photo of a plant leaf")
+
+    if camera_photo is not None:
+        show_prediction(camera_photo)
