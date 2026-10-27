@@ -96,4 +96,91 @@ DETAILED_SOLUTIONS = {
     },
     "Potato___Early_blight": {
         "title": "Potato Early Blight",
-        "action_advice": "Ensure balanced nitrogen fertilization and harvest
+        "action_advice": "Ensure balanced nitrogen fertilization and harvest tubers carefully without skin bruising.",
+        "commercial": "Chlorothalonil or Mancozeb sprays applied every 7–10 days.",
+        "organic": "Neem oil or copper soap sprays applied during dry morning hours.",
+        "expert": "Consult local extension advisors for regional potato blight forecasting alerts."
+    },
+    "Potato___Late_blight": {
+        "title": "Potato Late Blight",
+        "action_advice": "Destroy potato haulms (vines) 2 weeks before harvest to prevent tuber infection.",
+        "commercial": "Cymoxanil or Metalaxyl systemic fungicides according to local agricultural guidelines.",
+        "organic": "Copper-based organic sprays applied preventatively before rain events.",
+        "expert": "Notify local agricultural authorities immediately as potato late blight spreads aggressively across regions."
+    },
+    "Healthy": {
+        "title": "Healthy Plant",
+        "action_advice": "Your plant is in great condition! No treatment is required.",
+        "commercial": "None needed. Continue regular watering at the base and balanced fertilization.",
+        "organic": "Maintain preventive care with compost and proper spacing.",
+        "expert": "Keep up the excellent gardening practices!"
+    }
+}
+
+st.set_page_config(page_title="Plant Disease Detection", page_icon="🌿", layout="centered",
+                    initial_sidebar_state="collapsed")
+
+
+# --------------------------------------------------------------------------- model
+@st.cache_resource(show_spinner="Loading AI model (downloading if needed)...")
+def load_model():
+    import tensorflow as tf  # imported lazily so page loads instantly
+
+    if not MODEL_PATH.exists():
+        st.info("📥 Downloading model from Google Drive (first-time cloud boot, ~89MB)... Please wait.")
+        gdrive_url = "https://drive.google.com/uc?id=1wuHFBZs-76upHrPybchq4LZbh8khOTAP&export=download"
+        gdown.download(gdrive_url, str(MODEL_PATH), quiet=False)
+
+    return tf.keras.models.load_model(MODEL_PATH, compile=False)
+
+
+def preprocess(img: Image.Image, mode: str) -> np.ndarray:
+    img = ImageOps.exif_transpose(img).convert("RGB").resize(IMG_SIZE, Image.BILINEAR)
+    arr = np.asarray(img, dtype="float32")
+    if mode == "div255":
+        arr = arr / 255.0
+    elif mode == "xception":
+        arr = arr / 127.5 - 1.0
+    return np.expand_dims(arr, 0)
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def predict(image_bytes: bytes, mode: str) -> list:
+    model = load_model()
+    img = Image.open(io.BytesIO(image_bytes))
+    probs = model.predict(preprocess(img, mode), verbose=0)[0]
+    return [float(p) for p in probs]
+
+
+# ------------------------------------------------------------------ helpers
+def pretty(class_name: str) -> str:
+    crop, _, cond = class_name.partition("___")
+    crop = crop.replace("_", " ").replace(",", "")
+    cond = cond.replace("_", " ").strip()
+    return f"{crop} - {cond}"
+
+
+def crop_of(class_name: str) -> str:
+    return class_name.split("___")[0].split("_")[0].split(",")[0]
+
+
+def bullets(items):
+    for item in items:
+        st.markdown(f"- {item}")
+
+
+# ------------------------------------------------------------------ vibrant styling
+CSS = (
+    "<style>"
+    "#MainMenu, footer {visibility: hidden;}"
+    ".block-container {padding-top: 1.5rem; max-width: 860px;}"
+    ".hero {background: linear-gradient(135deg, #1b5e20 0%, #2e7d32 50%, #43a047 100%); color: #fff; "
+    "border-radius: 24px; padding: 32px 24px; text-align: center; margin-bottom: 22px; "
+    "box-shadow: 0 8px 20px rgba(46,125,50,0.25);}"
+    ".hero h1 {color: #fff; margin: 0; font-size: 2.3rem; font-weight: 800; letter-spacing: .4px;}"
+    ".hero p {color: #e8f5e9; margin: 8px 0 0; font-size: 1.08rem;}"
+    ".crops {display: flex; gap: 16px; margin-bottom: 24px;}"
+    ".crop {flex: 1; border-radius: 18px; padding: 16px 12px; text-align: center; "
+    "background: #ffffff; border: 2px solid #c8e6c9; box-shadow: 0 4px 12px rgba(0,0,0,0.04);}"
+    ".crop svg, .crop img {width: 90px; height: 90px; object-fit: cover; border-radius: 14px;}"
+    ".crop b {display: block; margin-top: 8px; font-size: 1.1rem; color: #1b
