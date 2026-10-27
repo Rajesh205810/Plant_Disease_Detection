@@ -1,3 +1,8 @@
+"""Plant Disease Detection - Streamlit app.
+
+Run:  streamlit run app.py
+Needs: model.h5 in the same folder as this file (or downloads automatically from Google Drive).
+"""
 import base64
 import io
 import json
@@ -176,4 +181,4 @@ CSS = """
 .hero p {color: #e8f5e9; margin: 8px 0 0; font-size: 1.08rem;}
 .crops {display: flex; gap: 16px; margin-bottom: 24px;}
 .crop {flex: 1; border-radius: 18px; padding: 16px 12px; text-align: center;
-       background: #ffffff; border: 2px solid #c8e6c9; box-shadow:
+       background:
