@@ -170,17 +170,90 @@ def bullets(items):
 
 
 # ------------------------------------------------------------------ vibrant styling
-CSS = (
-    "<style>"
-    "#MainMenu, footer {visibility: hidden;}"
-    ".block-container {padding-top: 1.5rem; max-width: 860px;}"
-    ".hero {background: linear-gradient(135deg, #1b5e20 0%, #2e7d32 50%, #43a047 100%); color: #fff; "
-    "border-radius: 24px; padding: 32px 24px; text-align: center; margin-bottom: 22px; "
-    "box-shadow: 0 8px 20px rgba(46,125,50,0.25);}"
-    ".hero h1 {color: #fff; margin: 0; font-size: 2.3rem; font-weight: 800; letter-spacing: .4px;}"
-    ".hero p {color: #e8f5e9; margin: 8px 0 0; font-size: 1.08rem;}"
-    ".crops {display: flex; gap: 16px; margin-bottom: 24px;}"
-    ".crop {flex: 1; border-radius: 18px; padding: 16px 12px; text-align: center; "
-    "background: #ffffff; border: 2px solid #c8e6c9; box-shadow: 0 4px 12px rgba(0,0,0,0.04);}"
-    ".crop svg, .crop img {width: 90px; height: 90px; object-fit: cover; border-radius: 14px;}"
-    ".crop b {display: block; margin-top: 8px; font-size: 1.1rem; color: #1b
+CSS = """
+<style>
+#MainMenu, footer {visibility: hidden;}
+.block-container {padding-top: 1.5rem; max-width: 860px;}
+.hero {background: linear-gradient(135deg, #1b5e20 0%, #2e7d32 50%, #43a047 100%); color: #fff; border-radius: 24px; padding: 32px 24px; text-align: center; margin-bottom: 22px; box-shadow: 0 8px 20px rgba(46,125,50,0.25);}
+.hero h1 {color: #fff; margin: 0; font-size: 2.3rem; font-weight: 800; letter-spacing: .4px;}
+.hero p {color: #e8f5e9; margin: 8px 0 0; font-size: 1.08rem;}
+.crops {display: flex; gap: 16px; margin-bottom: 24px;}
+.crop {flex: 1; border-radius: 18px; padding: 16px 12px; text-align: center; background: #ffffff; border: 2px solid #c8e6c9; box-shadow: 0 4px 12px rgba(0,0,0,0.04);}
+.crop svg, .crop img {width: 90px; height: 90px; object-fit: cover; border-radius: 14px;}
+.crop b {display: block; margin-top: 8px; font-size: 1.1rem; color: #1b5e20;}
+.crop span {font-size: .88rem; color: #558b2f;}
+.banner {border-radius: 16px; padding: 16px 20px; margin: 14px 0 18px; color: #fff; font-weight: 700; font-size: 1.15rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);}
+.b-none {background: #2e7d32;} .b-moderate {background: #f57c00;}
+.b-high {background: #e53935;} .b-incurable {background: #b71c1c;}
+.solution-box {background: #f1f8e9; border: 2px solid #aed581; border-radius: 16px; padding: 20px; margin: 16px 0; box-shadow: 0 4px 12px rgba(0,0,0,0.03);}
+.solution-box h3 {color: #2e7d32; margin-top: 0; font-size: 1.25rem;}
+.stat {text-align: center; border-radius: 16px; padding: 14px; background: #ffffff; border: 2px solid #c8e6c9; box-shadow: 0 4px 10px rgba(0,0,0,0.03);}
+.stat small {color: #558b2f; display: block; font-weight: 600;} .stat b {font-size: 1.3rem; color: #1b5e20;}
+.foot {text-align: center; color: #7f8c8d; font-size: .85rem; margin-top: 32px;}
+</style>
+"""
+
+TOMATO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+<circle cx="50" cy="56" r="34" fill="#e53935"/><ellipse cx="38" cy="42" rx="9" ry="5" fill="#ff8a80" opacity=".6" transform="rotate(-30 38 42)"/>
+<path d="M50 24 L43 14 L50 19 L57 14 Z M50 24 L33 24 L44 30 Z M50 24 L67 24 L56 30 Z M50 24 L38 34 L48 30 Z M50 24 L62 34 L52 30 Z"
+ fill="#2e7d32"/><rect x="48" y="10" width="4" height="12" rx="2" fill="#1b5e20"/></svg>"""
+
+POTATO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+<path d="M18 58 C14 36 34 22 56 26 C78 30 90 46 82 66 C74 84 40 88 26 76 C21 72 19 66 18 58 Z" fill="#c8923f"/>
+<path d="M30 40 C40 30 58 30 70 38" stroke="#e6b868" stroke-width="4" fill="none" stroke-linecap="round" opacity=".7"/>
+<circle cx="40" cy="58" r="2.6" fill="#8d5a1e"/><circle cx="58" cy="52" r="2.6" fill="#8d5a1e"/>
+<circle cx="66" cy="68" r="2.6" fill="#8d5a1e"/><circle cx="46" cy="72" r="2.6" fill="#8d5a1e"/>
+<circle cx="30" cy="62" r="2.2" fill="#8d5a1e"/></svg>"""
+
+
+def crop_visual(name: str, svg: str) -> str:
+    for ext in ("jpg", "jpeg", "png", "webp"):
+        p = BASE_DIR / "images" / f"{name}.{ext}"
+        if p.exists():
+            b64 = base64.b64encode(p.read_bytes()).decode()
+            return f'<img src="data:image/{ext};base64,{b64}">'
+    return svg
+
+
+def hero_and_crops():
+    st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown(
+        '<div class="hero"><h1>🌿 Plant Disease Detection</h1>'
+        '<p>Upload a leaf photo for instant AI diagnosis, store-bought chemical remedies, and organic care</p></div>',
+        unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="crops">'
+        f'<div class="crop">{crop_visual("tomato", TOMATO_SVG)}<b>Tomato</b><span>9 Diseases + Healthy</span></div>'
+        f'<div class="crop">{crop_visual("potato", POTATO_SVG)}<b>Potato</b><span>2 Diseases + Healthy</span></div>'
+        f'</div>', unsafe_allow_html=True)
+
+# ------------------------------------------------------------------ sidebar with Password-Protected GitHub link
+with st.sidebar:
+    st.header("⚙️ Settings")
+    threshold = st.slider("Minimum confidence", 40, 95, 70, 5, format="%d%%") / 100
+    with st.expander("Advanced"):
+        mode_label = st.selectbox(
+            "Image scaling used in training", list(PREPROCESS_MODES),
+            help="Must match how the model was trained.")
+    
+    st.divider()
+    st.subheader("📁 Project Code Access")
+    st.markdown("Enter password to unlock repository link:")
+    
+    # Password check input field
+    entered_password = st.text_input("Password", type="password", key="git_pass")
+    
+    if entered_password == "Rajesh444":
+        st.success("Access Granted! 🎉")
+        st.markdown("[🔗 Open GitHub Repository](https://github.com)", unsafe_allow_html=True)
+    elif entered_password != "":
+        st.error("Incorrect password. Try again.")
+
+mode = PREPROCESS_MODES[mode_label]
+
+# ------------------------------------------------------------------ main page
+hero_and_crops()
+
+tab_up, tab_cam = st.tabs(["📁 Upload Photo", "📷 Use Camera"])
+with tab_up:
+    uploaded = st.file_uploader("Choose a leaf
