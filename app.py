@@ -254,6 +254,139 @@ mode = PREPROCESS_MODES[mode_label]
 # ------------------------------------------------------------------ main page
 hero_and_crops()
 
+
+# ------------------------------------------------------------------ main page
+hero_and_crops()
+
 tab_up, tab_cam = st.tabs(["📁 Upload Photo", "📷 Use Camera"])
+
+
+def show_prediction(image_file):
+    """Predict plant disease and display results and treatment advice."""
+    try:
+        image_bytes = image_file.getvalue()
+
+        with st.spinner("Analyzing your plant leaf..."):
+            probabilities = predict(image_bytes, mode)
+
+        if not probabilities:
+            st.error("The model returned no predictions.")
+            return
+
+        predicted_index = int(np.argmax(probabilities))
+        confidence = float(probabilities[predicted_index])
+
+        if predicted_index >= len(CLASS_NAMES):
+            st.error(
+                "The model output does not match CLASS_NAMES. "
+                "Please check your model and disease_info.py."
+            )
+            return
+
+        class_name = CLASS_NAMES[predicted_index]
+
+        st.subheader("🔍 Diagnosis Results")
+
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            st.image(
+                Image.open(io.BytesIO(image_bytes)),
+                caption="Your uploaded leaf",
+                use_container_width=True,
+            )
+
+        with col2:
+            st.metric("Prediction confidence", f"{confidence:.1%}")
+            st.progress(max(0.0, min(1.0, confidence)))
+
+            if confidence < threshold:
+                st.warning(
+                    "Low confidence: the prediction is uncertain. "
+                    "Try a clearer photo with good lighting."
+                )
+            else:
+                st.success(f"Predicted class: {pretty(class_name)}")
+
+        # Display the most likely alternative predictions.
+        st.subheader("📊 Top Predictions")
+
+        top_indices = np.argsort(probabilities)[::-1][:3]
+
+        for idx in top_indices:
+            if idx < len(CLASS_NAMES):
+                st.write(
+                    f"**{pretty(CLASS_NAMES[idx])}** — "
+                    f"{probabilities[idx]:.1%}"
+                )
+
+        # Find treatment advice for the predicted disease.
+        solution = DETAILED_SOLUTIONS.get(class_name)
+
+        if solution:
+            st.subheader("🌱 Recommended Care")
+
+            st.markdown(
+                f"### {solution['title']}"
+            )
+
+            st.markdown("**Immediate action**")
+            st.write(solution["action_advice"])
+
+            st.markdown("**Commercial treatment**")
+            st.write(solution["commercial"])
+
+            st.markdown("**Organic care**")
+            st.write(solution["organic"])
+
+            st.markdown("**Expert advice**")
+            st.write(solution["expert"])
+
+            st.caption(
+                "Confirm the diagnosis before treating your crop. "
+                "For pesticides, follow the product label and local "
+                "agricultural guidance."
+            )
+        else:
+            # Fallback for classes without detailed treatment entries.
+            info = DISEASE_INFO.get(class_name)
+
+            st.subheader("🌿 Disease Information")
+
+            if info:
+                st.write(info)
+            else:
+                st.info(
+                    "No detailed treatment information is available "
+                    "for this predicted class yet."
+                )
+
+    except Exception as exc:
+        st.error(f"Could not analyze this image: {exc}")
+        st.info(
+            "Check that the model file, class names, and dependencies "
+            "are configured correctly."
+        )
+
+
+# Upload a leaf image.
 with tab_up:
-    uploaded = st.file_uploader("Choose a leaf
+    uploaded = st.file_uploader(
+        "Choose a leaf image",
+        type=["jpg", "jpeg", "png"],
+        key="leaf_upload",
+    )
+
+    if uploaded is not None:
+        show_prediction(uploaded)
+
+
+# Capture a leaf photo using the device camera.
+with tab_cam:
+    camera_photo = st.camera_input(
+        "Take a photo of a plant leaf",
+        key="leaf_camera",
+    )
+
+    if camera_photo is not None:
+        show_prediction(camera_photo)
