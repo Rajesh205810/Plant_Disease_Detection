@@ -1,4 +1,4 @@
-"""Plant Disease Detection & In-App AI Assistant - Streamlit App.
+"""Plant Disease Detection & Open-Source AI Assistant - Streamlit App.
 
 Run:  streamlit run app.py
 Needs: disease_info.py next to this file, and model.h5 (auto-downloads if missing).
@@ -8,7 +8,7 @@ import hmac
 import io
 import json
 import time
-import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -31,13 +31,13 @@ PREPROCESS_MODES = {
 }
 
 st.set_page_config(
-    page_title="Plant Disease Detection & AI Assistant",
+    page_title="Plant Disease Detection & Open-Source AI",
     page_icon="🌿",
     layout="centered",
     initial_sidebar_state="expanded"
 )
 
-# --------------------------------------------------------------------------- Session State Initialization
+# --------------------------------------------------------------------------- Session State Setup
 if "view" not in st.session_state:
     st.session_state.view = "scanner"  # "scanner" or "ai_assistant"
 if "chat_messages" not in st.session_state:
@@ -45,7 +45,7 @@ if "chat_messages" not in st.session_state:
 if "current_diagnosis" not in st.session_state:
     st.session_state.current_diagnosis = None
 
-# --------------------------------------------------------------------------- Styling
+# --------------------------------------------------------------------------- CSS Styling
 CSS = """
 <style>
 /* ---- hide Streamlit toolbar and footer ---- */
@@ -118,7 +118,7 @@ header[data-testid="stHeader"] {background: transparent !important;}
 .cbar-scale {display:flex; justify-content:space-between; font-size:.72rem; opacity:.55; margin-top:6px;}
 .cbar-note {font-size:.85rem; margin-top:6px; opacity:.85;}
 
-/* ---- context card ---- */
+/* ---- context banner ---- */
 .ai-context-banner {
     background: linear-gradient(135deg, rgba(27,138,58,0.18), rgba(124,179,66,0.1));
     border: 1px solid rgba(76,175,80,0.4);
@@ -250,69 +250,81 @@ def crop_of(class_name: str) -> str:
     return class_name.split("___")[0].split("_")[0].split(",")[0]
 
 
-def generate_in_app_ai_response(user_query: str, diagnosis_ctx: dict, ollama_config: tuple = None) -> str:
-    """In-App AI engine running directly inside app backend without external redirection."""
-    dis_title = diagnosis_ctx.get("disease", "Unknown Condition") if diagnosis_ctx else "General Query"
+# --------------------------------------------------------------------------- Open-Source Data Fetcher
+def fetch_open_source_data(query: str, disease_name: str = "") -> str:
+    """Fetch live factual knowledge from DuckDuckGo / Wikipedia Open APIs backend-side."""
+    search_term = f"{disease_name} {query} agriculture plant care".strip()
+    fetched_info = ""
+    try:
+        url = f"https://api.duckduckgo.com/?q={urllib.parse.quote(search_term)}&format=json&no_html=1"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Streamlit Plant AI)"})
+        with urllib.request.urlopen(req, timeout=6) as response:
+            data = json.loads(response.read().decode("utf-8"))
+            if data.get("AbstractText"):
+                fetched_info = data["AbstractText"]
+            elif data.get("RelatedTopics"):
+                snippets = [item["Text"] for item in data["RelatedTopics"] if isinstance(item, dict) and "Text" in item]
+                if snippets:
+                    fetched_info = " ".join(snippets[:2])
+    except Exception:
+        pass
+    return fetched_info
+
+
+def generate_open_source_ai_response(user_query: str, diagnosis_ctx: dict, hf_token: str = "") -> str:
+    """Fetches open-source data and synthesizes real-time AI answers in backend."""
+    dis_title = diagnosis_ctx.get("disease", "") if diagnosis_ctx else ""
     dis_cause = diagnosis_ctx.get("cause", "") if diagnosis_ctx else ""
 
-    ctx_text = "No leaf diagnosis loaded."
-    if diagnosis_ctx:
-        ctx_text = (
-            f"Condition: {dis_title}\n"
-            f"Confidence: {diagnosis_ctx.get('confidence', 0):.1%}\n"
-            f"Cause: {dis_cause}\n"
-            f"Symptoms: {', '.join(diagnosis_ctx.get('symptoms', []))}\n"
-            f"Organic Remedies: {', '.join(diagnosis_ctx.get('cultural', []))}\n"
-            f"Chemical Treatments: {', '.join(diagnosis_ctx.get('chemical', []))}"
-        )
+    # Fetch dynamic open-source knowledge from open API endpoints
+    open_knowledge = fetch_open_source_data(user_query, dis_title)
 
-    # Option A: Local Ollama backend connection if enabled
-    if ollama_config and ollama_config[0]:
-        _, model_name, host = ollama_config
+    # Optional: Query Hugging Face Open-Source Model API if token provided
+    if hf_token.strip():
         try:
-            payload = json.dumps({
-                "model": model_name,
-                "stream": False,
-                "messages": [
-                    {"role": "system", "content": "You are a helpful plant health assistant. Answer practical gardening questions briefly and clearly."},
-                    {"role": "user", "content": f"Diagnosis Data:\n{ctx_text}\n\nUser Question: {user_query}"}
-                ]
-            }).encode("utf-8")
-            req = urllib.request.Request(f"{host.rstrip('/')}/api/chat", data=payload, headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                return json.loads(resp.read())["message"]["content"]
+            hf_url = "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-72B-Instruct"
+            prompt = f"System: You are an agricultural expert.\nLeaf Scan Context: {dis_title} - {dis_cause}\nOpen Knowledge: {open_knowledge}\nUser Question: {user_query}\nAnswer:"
+            payload = json.dumps({"inputs": prompt, "parameters": {"max_new_tokens": 250, "temperature": 0.7}}).encode("utf-8")
+            req = urllib.request.Request(hf_url, data=payload, headers={"Authorization": f"Bearer {hf_token}", "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+                if isinstance(result, list) and len(result) > 0 and "generated_text" in result[0]:
+                    return f"🌐 **Open-Source AI Response (Hugging Face):**\n\n{result[0]['generated_text']}"
         except Exception:
             pass
 
-    # Option B: Built-In Direct Backend AI Engine (Runs inside Streamlit without external pages)
+    # Built-in contextual AI synthesizer using open-source data
     q_lower = user_query.lower()
+    
     if "eat" in q_lower or "harvest" in q_lower or "safe" in q_lower:
         if diagnosis_ctx and diagnosis_ctx.get('is_healthy'):
             return "✅ **Yes!** Your plant is completely healthy, so harvested produce is safe to eat."
-        return "⚠️ **Harvest Safety:** Remove severely affected leaves or infected fruit. Healthy fruit from the rest of the plant is usually safe to eat after thorough washing, but avoid eating fruit showing soft rot or dark lesions."
+        return f"⚠️ **Harvest Safety Advice:** Remove leaves or fruits showing heavy decay or fungal spores. Healthy produce from unaffected branches is generally safe after thorough washing.\n\n*Open Knowledge Snippet:* {open_knowledge if open_knowledge else 'Ensure harvested fruit is washed and free of soft rot lesions.'}"
 
     if "organic" in q_lower or "home" in q_lower or "natural" in q_lower or "remedy" in q_lower:
         if diagnosis_ctx and diagnosis_ctx.get('cultural'):
             remedies = "\n- ".join(diagnosis_ctx['cultural'])
-            return f"🌿 **Organic Care Plan for {dis_title}:**\n\n- {remedies}\n\n*Pro Tip:* Always irrigate at soil level to keep leaves dry and prevent fungal spores from spreading."
-        return "🌿 **Organic Care Tips:** Prune low-hanging foliage, apply neem oil or copper fungicide spray, and ensure generous spacing between plants for airflow."
+            return f"🌿 **Organic Care Plan for {dis_title}:**\n\n- {remedies}\n\n🌐 *Open Source Knowledge:* {open_knowledge if open_knowledge else 'Prune lower foliage to enhance air movement and reduce fungal humidity.'}"
+        return f"🌿 **Organic Plant Care:** Prune crowded leaves, avoid overhead watering, and apply neem oil or copper spray weekly."
 
-    if "chemical" in q_lower or "medicine" in q_lower or "spray" in q_lower:
+    if "chemical" in q_lower or "spray" in q_lower or "medicine" in q_lower:
         if diagnosis_ctx and diagnosis_ctx.get('chemical'):
             chems = "\n- ".join(diagnosis_ctx['chemical'])
-            return f"💊 **Commercial Treatment Options for {dis_title}:**\n\n- {chems}\n\n⚠️ *Always follow safety instructions on the product label.*"
-        return "💊 Consult local agricultural centers for fungicides or sprays registered in your area."
+            return f"💊 **Commercial Treatments for {dis_title}:**\n\n- {chems}\n\n⚠️ *Follow local product safety guidelines and harvest buffer times.*"
+        return "💊 Consult local agricultural extension centers for registered crop protection formulas."
 
+    # General Query Response with Open Data Integration
     if diagnosis_ctx:
-        return (
-            f"🤖 **Assistant Analysis for {dis_title}:**\n\n"
-            f"Regarding your query: *\"{user_query}\"*\n\n"
-            f"- **Cause:** {dis_cause}\n"
-            f"- **Next Steps:** Prune affected lower foliage, keep soil moist but well-drained, and sanitize garden tools after trimming.\n\n"
-            f"Feel free to ask more details on organic spraying, watering schedules, or prevention!"
-        )
+        res = f"🤖 **AI Analysis for {dis_title}:**\n\n- **Diagnosis:** {dis_title}\n- **Cause:** {dis_cause}\n"
+        if open_knowledge:
+            res += f"\n🌐 **Fetched Open Data:** {open_knowledge}\n"
+        res += f"\n💡 *Recommendation:* Keep foliage dry, water strictly at the plant base, and monitor new growth."
+        return res
 
-    return "🤖 **Plant AI:** I am ready to help! Upload a leaf photo in the **Leaf Scanner** screen to get a tailored analysis."
+    if open_knowledge:
+        return f"🌐 **Open Knowledge Answer:**\n\n{open_knowledge}"
+
+    return "🤖 **Plant AI:** Upload a leaf image in the **Leaf Scanner** screen to receive a complete diagnosis!"
 
 
 def bullets(items):
@@ -366,13 +378,8 @@ with st.sidebar:
         mode_label = st.selectbox(
             "Image scaling used in training", list(PREPROCESS_MODES),
             help="Must match how the model was trained. If healthy leaves look wrong, try another option.")
-    use_llm = st.toggle("Local Ollama Server", value=False,
-                        help="Optional. Connects to your local Ollama server if installed.")
-    if use_llm:
-        llm_model = st.text_input("Ollama model", "llama3.2")
-        llm_host = st.text_input("Ollama address", "http://localhost:11434")
-    else:
-        llm_model, llm_host = None, None
+        hf_token = st.text_input("HuggingFace Open API Key (Optional)", type="password",
+                                 help="Optional token to query open-source Hugging Face LLMs directly.")
 
     st.divider()
     if st.button("🚪 Log out"):
@@ -380,7 +387,6 @@ with st.sidebar:
         st.rerun()
 
 mode = PREPROCESS_MODES[mode_label]
-ollama_cfg = (use_llm, llm_model, llm_host)
 
 # =========================================================================== SCREEN 1: LEAF SCANNER
 if st.session_state.view == "scanner":
@@ -429,7 +435,7 @@ if st.session_state.view == "scanner":
     severity = info["severity"] if supported else "none"
     is_healthy = supported and severity == "none"
 
-    # Save diagnosis data directly to session memory for the in-app AI
+    # Save diagnosis data into session memory for the in-app AI
     if supported and confident:
         st.session_state.current_diagnosis = {
             "disease": info["title"],
@@ -480,7 +486,7 @@ if st.session_state.view == "scanner":
             f'<div class="cbar-scale"><span>0%</span><span>50%</span><span>100%</span></div>'
             f'<div class="cbar-note">{conf_word}</div></div>', unsafe_allow_html=True)
 
-        # Quick In-App AI Chat launch button
+        # Quick Chat launch button
         if supported and confident:
             if st.button("💬 Ask AI About This Diagnosis", use_container_width=True):
                 st.session_state.view = "ai_assistant"
@@ -520,23 +526,22 @@ if st.session_state.view == "scanner":
 
 # =========================================================================== SCREEN 2: IN-APP AI ASSISTANT
 elif st.session_state.view == "ai_assistant":
-    st.markdown("## 🤖 In-App Plant AI Assistant")
-    st.caption("Ask questions, get customized organic advice, or learn how to care for your plant.")
+    st.markdown("## 🤖 In-App Open-Source AI Assistant")
+    st.caption("Answers are dynamically fetched from open sources & synthesized in the app backend.")
 
     curr_diag = st.session_state.current_diagnosis
     if curr_diag:
         st.markdown(
             f'<div class="ai-context-banner">'
-            f'<b>📌 Active Diagnosis Context:</b> {curr_diag["disease"]} '
+            f'<b>📌 Active Scan Context:</b> {curr_diag["disease"]} '
             f'({curr_diag["confidence"]:.1%} confidence)<br>'
-            f'<small>The AI is configured with your current leaf diagnosis details.</small>'
+            f'<small>Your scan details are automatically attached to questions you ask.</small>'
             f'</div>',
             unsafe_allow_html=True
         )
     else:
-        st.info("💡 No leaf scan loaded yet. You can ask general gardening questions or scan a leaf image first.")
+        st.info("💡 No leaf scan loaded yet. You can ask general plant questions or upload a photo in the Leaf Scanner.")
 
-    # Quick action prompt buttons
     st.write("**Quick Questions:**")
     qcol1, qcol2, qcol3 = st.columns(3)
     quick_prompt = None
@@ -547,30 +552,29 @@ elif st.session_state.view == "ai_assistant":
         if st.button("⚠️ Safe to Harvest?"):
             quick_prompt = "Is produce from this plant safe to eat?"
     with qcol3:
-        if st.button("💊 Spray Precautions"):
-            quick_prompt = "What chemical or spray precautions should I follow?"
+        if st.button("💊 Spray Advice"):
+            quick_prompt = "What spraying precautions should I follow?"
 
     st.divider()
 
-    # Display chat history
+    # Display chat messages
     for msg in st.session_state.chat_messages:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
     # Chat input box
-    user_input = st.chat_input("Ask any question about plant care, treatments, or disease prevention...")
+    user_input = st.chat_input("Ask any question about plant health or treatments...")
     active_query = user_input or quick_prompt
 
     if active_query:
-        # Append user message
         st.session_state.chat_messages.append({"role": "user", "content": active_query})
         with st.chat_message("user"):
             st.markdown(active_query)
 
-        # Generate in-app response directly
         with st.chat_message("assistant"):
-            with st.spinner("Analyzing context & generating response..."):
-                response = generate_in_app_ai_response(active_query, curr_diag, ollama_cfg)
+            with st.spinner("Fetching open-source data & synthesizing response..."):
+                token_val = hf_token if 'hf_token' in locals() else ""
+                response = generate_open_source_ai_response(active_query, curr_diag, token_val)
                 st.markdown(response)
 
         st.session_state.chat_messages.append({"role": "assistant", "content": response})
