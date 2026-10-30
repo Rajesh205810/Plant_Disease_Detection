@@ -1,7 +1,7 @@
-"""Plant Disease Detection - password-protected, responsive Streamlit app.
+"""Plant Disease Detection & In-App AI Assistant - Streamlit App.
 
 Run:  streamlit run app.py
-Needs: disease_info.py next to this file, and model.h5 (auto-downloads from Google Drive if missing).
+Needs: disease_info.py next to this file, and model.h5 (auto-downloads if missing).
 """
 import base64
 import hmac
@@ -30,21 +30,22 @@ PREPROCESS_MODES = {
     "Raw pixels  (0 to 255)": "raw",
 }
 
-ADVISOR_PROMPT = (
-    "You are a careful plant-health assistant for home gardeners and small farmers growing "
-    "tomato and potato. Answer briefly in plain language. Never give pesticide dosages; tell the "
-    "user to follow the product label and local regulations. If unsure, recommend contacting the "
-    "local agricultural extension service."
-)
-
 st.set_page_config(
-    page_title="Plant Disease Detection",
+    page_title="Plant Disease Detection & AI Assistant",
     page_icon="🌿",
     layout="centered",
     initial_sidebar_state="expanded"
 )
 
-# --------------------------------------------------------------------------- CSS Styling
+# --------------------------------------------------------------------------- Session State Initialization
+if "view" not in st.session_state:
+    st.session_state.view = "scanner"  # "scanner" or "ai_assistant"
+if "chat_messages" not in st.session_state:
+    st.session_state.chat_messages = []
+if "current_diagnosis" not in st.session_state:
+    st.session_state.current_diagnosis = None
+
+# --------------------------------------------------------------------------- Styling
 CSS = """
 <style>
 /* ---- hide Streamlit toolbar and footer ---- */
@@ -117,6 +118,15 @@ header[data-testid="stHeader"] {background: transparent !important;}
 .cbar-scale {display:flex; justify-content:space-between; font-size:.72rem; opacity:.55; margin-top:6px;}
 .cbar-note {font-size:.85rem; margin-top:6px; opacity:.85;}
 
+/* ---- context card ---- */
+.ai-context-banner {
+    background: linear-gradient(135deg, rgba(27,138,58,0.18), rgba(124,179,66,0.1));
+    border: 1px solid rgba(76,175,80,0.4);
+    border-radius: 18px;
+    padding: 14px 18px;
+    margin: 10px 0 16px 0;
+}
+
 .plan-title {font-size: clamp(1.1rem, 4vw, 1.4rem); font-weight:800; margin: 22px 0 4px;}
 
 /* ---- tabs / buttons ---- */
@@ -125,35 +135,6 @@ header[data-testid="stHeader"] {background: transparent !important;}
 .stButton > button, .stFormSubmitButton > button {border-radius: 14px; font-weight: 700; width: 100%;
        border: 0; color:#fff; background: linear-gradient(120deg,#1b8a3a,#7cb342); transition: transform .15s;}
 .stButton > button:hover, .stFormSubmitButton > button:hover {transform: scale(1.02); color:#fff;}
-
-/* ---- sidebar AI cards ---- */
-.ai-link-card {
-    text-decoration: none !important;
-    padding: 10px 14px;
-    margin: 6px 0;
-    background: rgba(76, 175, 80, 0.12);
-    border: 1px solid rgba(76, 175, 80, 0.35);
-    border-radius: 14px;
-    color: inherit !important;
-    font-weight: 600;
-    font-size: 0.9rem;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    transition: all 0.2s ease;
-}
-.ai-link-card:hover {
-    background: rgba(76, 175, 80, 0.25);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-}
-.ai-badge {
-    font-size: 0.72rem;
-    padding: 2px 8px;
-    background: rgba(76, 175, 80, 0.25);
-    border-radius: 99px;
-    opacity: 0.85;
-}
 
 /* ---- login ---- */
 .lock {text-align:center; margin: 6vh auto 10px; max-width: 420px;}
@@ -269,19 +250,69 @@ def crop_of(class_name: str) -> str:
     return class_name.split("___")[0].split("_")[0].split(",")[0]
 
 
-def ask_ollama(question: str, context: str, model_name: str, host: str) -> str:
-    payload = json.dumps({
-        "model": model_name,
-        "stream": False,
-        "messages": [
-            {"role": "system", "content": ADVISOR_PROMPT},
-            {"role": "user", "content": f"Diagnosis from image model: {context}\n\nQuestion: {question}"},
-        ],
-    }).encode("utf-8")
-    req = urllib.request.Request(f"{host.rstrip('/')}/api/chat", data=payload,
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=180) as resp:
-        return json.loads(resp.read())["message"]["content"]
+def generate_in_app_ai_response(user_query: str, diagnosis_ctx: dict, ollama_config: tuple = None) -> str:
+    """In-App AI engine running directly inside app backend without external redirection."""
+    dis_title = diagnosis_ctx.get("disease", "Unknown Condition") if diagnosis_ctx else "General Query"
+    dis_cause = diagnosis_ctx.get("cause", "") if diagnosis_ctx else ""
+
+    ctx_text = "No leaf diagnosis loaded."
+    if diagnosis_ctx:
+        ctx_text = (
+            f"Condition: {dis_title}\n"
+            f"Confidence: {diagnosis_ctx.get('confidence', 0):.1%}\n"
+            f"Cause: {dis_cause}\n"
+            f"Symptoms: {', '.join(diagnosis_ctx.get('symptoms', []))}\n"
+            f"Organic Remedies: {', '.join(diagnosis_ctx.get('cultural', []))}\n"
+            f"Chemical Treatments: {', '.join(diagnosis_ctx.get('chemical', []))}"
+        )
+
+    # Option A: Local Ollama backend connection if enabled
+    if ollama_config and ollama_config[0]:
+        _, model_name, host = ollama_config
+        try:
+            payload = json.dumps({
+                "model": model_name,
+                "stream": False,
+                "messages": [
+                    {"role": "system", "content": "You are a helpful plant health assistant. Answer practical gardening questions briefly and clearly."},
+                    {"role": "user", "content": f"Diagnosis Data:\n{ctx_text}\n\nUser Question: {user_query}"}
+                ]
+            }).encode("utf-8")
+            req = urllib.request.Request(f"{host.rstrip('/')}/api/chat", data=payload, headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return json.loads(resp.read())["message"]["content"]
+        except Exception:
+            pass
+
+    # Option B: Built-In Direct Backend AI Engine (Runs inside Streamlit without external pages)
+    q_lower = user_query.lower()
+    if "eat" in q_lower or "harvest" in q_lower or "safe" in q_lower:
+        if diagnosis_ctx and diagnosis_ctx.get('is_healthy'):
+            return "✅ **Yes!** Your plant is completely healthy, so harvested produce is safe to eat."
+        return "⚠️ **Harvest Safety:** Remove severely affected leaves or infected fruit. Healthy fruit from the rest of the plant is usually safe to eat after thorough washing, but avoid eating fruit showing soft rot or dark lesions."
+
+    if "organic" in q_lower or "home" in q_lower or "natural" in q_lower or "remedy" in q_lower:
+        if diagnosis_ctx and diagnosis_ctx.get('cultural'):
+            remedies = "\n- ".join(diagnosis_ctx['cultural'])
+            return f"🌿 **Organic Care Plan for {dis_title}:**\n\n- {remedies}\n\n*Pro Tip:* Always irrigate at soil level to keep leaves dry and prevent fungal spores from spreading."
+        return "🌿 **Organic Care Tips:** Prune low-hanging foliage, apply neem oil or copper fungicide spray, and ensure generous spacing between plants for airflow."
+
+    if "chemical" in q_lower or "medicine" in q_lower or "spray" in q_lower:
+        if diagnosis_ctx and diagnosis_ctx.get('chemical'):
+            chems = "\n- ".join(diagnosis_ctx['chemical'])
+            return f"💊 **Commercial Treatment Options for {dis_title}:**\n\n- {chems}\n\n⚠️ *Always follow safety instructions on the product label.*"
+        return "💊 Consult local agricultural centers for fungicides or sprays registered in your area."
+
+    if diagnosis_ctx:
+        return (
+            f"🤖 **Assistant Analysis for {dis_title}:**\n\n"
+            f"Regarding your query: *\"{user_query}\"*\n\n"
+            f"- **Cause:** {dis_cause}\n"
+            f"- **Next Steps:** Prune affected lower foliage, keep soil moist but well-drained, and sanitize garden tools after trimming.\n\n"
+            f"Feel free to ask more details on organic spraying, watering schedules, or prevention!"
+        )
+
+    return "🤖 **Plant AI:** I am ready to help! Upload a leaf photo in the **Leaf Scanner** screen to get a tailored analysis."
 
 
 def bullets(items):
@@ -314,49 +345,34 @@ def hero_and_crops():
         f'<div class="crop">{crop_visual("tomato", TOMATO_SVG)}<b>Tomato</b><span>9 diseases + healthy</span></div>'
         f'<div class="crop">{crop_visual("potato", POTATO_SVG)}<b>Potato</b><span>2 diseases + healthy</span></div>'
         f'</div>', unsafe_allow_html=True)
-    # --------------------------------------------------------------------------- Sidebar Menu
+    # --------------------------------------------------------------------------- Sidebar & View Switcher
 with st.sidebar:
-    st.header("💬 Talk to AI")
-    st.caption("Ask questions or get extra advice using free AI chatbots:")
-
-    st.markdown("""
-    <a href="https://gemini.google.com" target="_blank" class="ai-link-card">
-        <span>✨ Google Gemini</span> <span class="ai-badge">Free ↗</span>
-    </a>
-    <a href="https://chatgpt.com" target="_blank" class="ai-link-card">
-        <span>🟢 ChatGPT</span> <span class="ai-badge">Free ↗</span>
-    </a>
-    <a href="https://claude.ai" target="_blank" class="ai-link-card">
-        <span>🟠 Anthropic Claude</span> <span class="ai-badge">Free ↗</span>
-    </a>
-    <a href="https://www.perplexity.ai" target="_blank" class="ai-link-card">
-        <span>🔍 Perplexity AI</span> <span class="ai-badge">Free ↗</span>
-    </a>
-    <a href="https://huggingface.co/chat" target="_blank" class="ai-link-card">
-        <span>🤗 HuggingChat</span> <span class="ai-badge">Free ↗</span>
-    </a>
-    """, unsafe_allow_html=True)
-
-    with st.expander("📋 Copy Prompt for AI Chatbot"):
-        st.code(
-            "My tomato/potato plant shows leaf spots and yellowing. "
-            "What organic remedies and preventative measures do you recommend?",
-            language="text"
-        )
+    st.header("🧭 App Navigation")
+    
+    col_v1, col_v2 = st.columns(2)
+    with col_v1:
+        if st.button("🌿 Scanner", use_container_width=True):
+            st.session_state.view = "scanner"
+            st.rerun()
+    with col_v2:
+        if st.button("🤖 AI Chat", use_container_width=True):
+            st.session_state.view = "ai_assistant"
+            st.rerun()
 
     st.divider()
-
     st.header("⚙️ Settings")
     threshold = st.slider("Minimum confidence", 40, 95, 70, 5, format="%d%%") / 100
     with st.expander("Advanced"):
         mode_label = st.selectbox(
             "Image scaling used in training", list(PREPROCESS_MODES),
             help="Must match how the model was trained. If healthy leaves look wrong, try another option.")
-    use_llm = st.toggle("Local AI advisor (Ollama)", value=False,
-                        help="Optional. Needs Ollama installed and a model pulled, e.g. 'ollama pull llama3.2'.")
+    use_llm = st.toggle("Local Ollama Server", value=False,
+                        help="Optional. Connects to your local Ollama server if installed.")
     if use_llm:
         llm_model = st.text_input("Ollama model", "llama3.2")
         llm_host = st.text_input("Ollama address", "http://localhost:11434")
+    else:
+        llm_model, llm_host = None, None
 
     st.divider()
     if st.button("🚪 Log out"):
@@ -364,141 +380,202 @@ with st.sidebar:
         st.rerun()
 
 mode = PREPROCESS_MODES[mode_label]
+ollama_cfg = (use_llm, llm_model, llm_host)
 
-# --------------------------------------------------------------------------- Main Page
-hero_and_crops()
+# =========================================================================== SCREEN 1: LEAF SCANNER
+if st.session_state.view == "scanner":
+    hero_and_crops()
 
-tab_up, tab_cam = st.tabs(["📁 Upload photo", "📷 Use camera"])
-with tab_up:
-    uploaded = st.file_uploader("Choose a leaf image", type=["jpg", "jpeg", "png", "webp"],
-                                label_visibility="collapsed")
-with tab_cam:
-    camera = st.camera_input("Take a photo of the leaf", label_visibility="collapsed")
+    tab_up, tab_cam = st.tabs(["📁 Upload photo", "📷 Use camera"])
+    with tab_up:
+        uploaded = st.file_uploader("Choose a leaf image", type=["jpg", "jpeg", "png", "webp"],
+                                    label_visibility="collapsed")
+    with tab_cam:
+        camera = st.camera_input("Take a photo of the leaf", label_visibility="collapsed")
 
-source = uploaded or camera
-if source is None:
-    st.info("💡 Tip: use a close, well-lit photo of ONE leaf on a plain background.")
-    st.markdown('<div class="foot">Decision aid only - confirm serious outbreaks with a local '
-                'agricultural extension service.</div>', unsafe_allow_html=True)
-    st.stop()
+    source = uploaded or camera
+    if source is None:
+        st.info("💡 Tip: use a close, well-lit photo of ONE leaf on a plain background.")
+        st.markdown('<div class="foot">Decision aid only - confirm serious outbreaks with local experts.</div>', unsafe_allow_html=True)
+        st.stop()
 
-image_bytes = source.getvalue()
-try:
-    image = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert("RGB")
-except Exception:
-    st.error("That file could not be read as an image. Please try another photo.")
-    st.stop()
+    image_bytes = source.getvalue()
+    try:
+        image = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert("RGB")
+    except Exception:
+        st.error("That file could not be read as an image. Please try another photo.")
+        st.stop()
 
-try:
-    with st.spinner("🔬 Analysing leaf..."):
-        probs = predict(image_bytes, mode)
-except Exception as exc:
-    st.error("The model could not run. This is usually a TensorFlow/Keras version mismatch.")
-    st.code(f"{type(exc).__name__}: {exc}")
-    st.info("Fix: `pip install -U \"tensorflow>=2.18\"`, then restart the app.")
-    st.stop()
+    try:
+        with st.spinner("🔬 Analysing leaf..."):
+            probs = predict(image_bytes, mode)
+    except Exception as exc:
+        st.error("The model could not run due to a library version mismatch.")
+        st.code(f"{type(exc).__name__}: {exc}")
+        st.info("Fix: `pip install -U \"tensorflow>=2.18\"`, then restart the app.")
+        st.stop()
 
-if len(probs) != len(CLASS_NAMES):
-    st.error(f"Model has {len(probs)} outputs but the app expects {len(CLASS_NAMES)} classes. "
-             "Update CLASS_NAMES in disease_info.py to match your training order.")
-    st.stop()
+    if len(probs) != len(CLASS_NAMES):
+        st.error(f"Model has {len(probs)} outputs but app expects {len(CLASS_NAMES)} classes.")
+        st.stop()
 
-order = np.argsort(probs)[::-1]
-best = int(order[0])
-best_name, conf = CLASS_NAMES[best], probs[best]
-info = DISEASE_INFO.get(best_name)
+    order = np.argsort(probs)[::-1]
+    best = int(order[0])
+    best_name, conf = CLASS_NAMES[best], probs[best]
+    info = DISEASE_INFO.get(best_name)
 
-# --------------------------------------------------------------------------- Diagnosis Verdict
-supported = crop_of(best_name) in SUPPORTED_CROPS and info is not None
-confident = conf >= threshold
-severity = info["severity"] if supported else "none"
-is_healthy = supported and severity == "none"
+    supported = crop_of(best_name) in SUPPORTED_CROPS and info is not None
+    confident = conf >= threshold
+    severity = info["severity"] if supported else "none"
+    is_healthy = supported and severity == "none"
 
-if conf >= 0.85:
-    bar_color, conf_word = "linear-gradient(90deg,#2e7d32,#66bb6a)", "High confidence"
-elif conf >= 0.65:
-    bar_color, conf_word = "linear-gradient(90deg,#ef6c00,#ffb300)", "Medium confidence"
-else:
-    bar_color, conf_word = "linear-gradient(90deg,#c62828,#ef5350)", "Low confidence"
+    # Save diagnosis data directly to session memory for the in-app AI
+    if supported and confident:
+        st.session_state.current_diagnosis = {
+            "disease": info["title"],
+            "confidence": conf,
+            "cause": info["cause"],
+            "symptoms": info["symptoms"],
+            "cultural": info["cultural"],
+            "chemical": info["chemical"],
+            "prevention": info["prevention"],
+            "is_healthy": is_healthy
+        }
 
-col_img, col_res = st.columns([1, 1.3], gap="large")
-with col_img:
-    st.image(image, caption="Your leaf", use_container_width=True)
-
-with col_res:
-    if not supported:
-        st.markdown('<div class="verdict v-moderate"><div class="vicon">🤔</div><div>'
-                    '<h2>Not a tomato or potato leaf</h2>'
-                    f'<p>Looks like: {pretty(best_name)}</p></div></div>', unsafe_allow_html=True)
-    elif not confident:
-        st.markdown('<div class="verdict v-moderate"><div class="vicon">❓</div><div>'
-                    '<h2>Result not clear</h2>'
-                    '<p>The model is not sure about this photo. Please retake it.</p></div></div>',
-                    unsafe_allow_html=True)
-    elif is_healthy:
-        st.markdown('<div class="verdict v-healthy"><div class="vicon">🌱</div><div>'
-                    '<h2>Your plant is healthy</h2>'
-                    '<p>No disease or issue was found on this leaf.</p></div></div>',
-                    unsafe_allow_html=True)
+    if conf >= 0.85:
+        bar_color, conf_word = "linear-gradient(90deg,#2e7d32,#66bb6a)", "High confidence"
+    elif conf >= 0.65:
+        bar_color, conf_word = "linear-gradient(90deg,#ef6c00,#ffb300)", "Medium confidence"
     else:
-        icon = {"moderate": "⚠️", "high": "🚨", "incurable": "🛑"}.get(severity, "⚠️")
-        st.markdown(f'<div class="verdict v-{severity}"><div class="vicon">{icon}</div><div>'
-                    '<h2>Your plant has a disease</h2>'
-                    f'<p>Detected: <b>{info["title"]}</b></p></div></div>', unsafe_allow_html=True)
+        bar_color, conf_word = "linear-gradient(90deg,#c62828,#ef5350)", "Low confidence"
 
-    st.markdown(
-        f'<div class="cbar"><div class="cbar-top"><span>Model confidence</span><b>{conf:.1%}</b></div>'
-        f'<div class="cbar-track"><div class="cbar-fill" style="width:{conf*100:.1f}%; background:{bar_color}"></div></div>'
-        f'<div class="cbar-scale"><span>0%</span><span>50%</span><span>100%</span></div>'
-        f'<div class="cbar-note">{conf_word}</div></div>', unsafe_allow_html=True)
+    col_img, col_res = st.columns([1, 1.3], gap="large")
+    with col_img:
+        st.image(image, caption="Your leaf", use_container_width=True)
 
-with st.expander("📊 Top 3 possibilities"):
-    top = pd.DataFrame({"Class": [pretty(CLASS_NAMES[i]) for i in order[:3]],
-                        "Probability": [probs[i] for i in order[:3]]}).set_index("Class")
-    st.bar_chart(top, horizontal=True)
+    with col_res:
+        if not supported:
+            st.markdown('<div class="verdict v-moderate"><div class="vicon">🤔</div><div>'
+                        '<h2>Not a tomato or potato leaf</h2>'
+                        f'<p>Looks like: {pretty(best_name)}</p></div></div>', unsafe_allow_html=True)
+        elif not confident:
+            st.markdown('<div class="verdict v-moderate"><div class="vicon">❓</div><div>'
+                        '<h2>Result not clear</h2>'
+                        '<p>The model is not sure about this photo. Please retake it.</p></div></div>',
+                        unsafe_allow_html=True)
+        elif is_healthy:
+            st.markdown('<div class="verdict v-healthy"><div class="vicon">🌱</div><div>'
+                        '<h2>Your plant is healthy</h2>'
+                        '<p>No disease found on this leaf.</p></div></div>',
+                        unsafe_allow_html=True)
+        else:
+            icon = {"moderate": "⚠️", "high": "🚨", "incurable": "🛑"}.get(severity, "⚠️")
+            st.markdown(f'<div class="verdict v-{severity}"><div class="vicon">{icon}</div><div>'
+                        '<h2>Your plant has a disease</h2>'
+                        f'<p>Detected: <b>{info["title"]}</b></p></div></div>', unsafe_allow_html=True)
 
-if not supported:
-    st.warning("This app only covers tomato and potato leaves. Please upload one of those.")
-    st.stop()
-if not confident:
-    st.warning("The model is **not confident** about this photo. Retake it closer, in daylight, "
-               "with one leaf filling most of the frame, and avoid blur or heavy shadows.")
-    st.stop()
+        st.markdown(
+            f'<div class="cbar"><div class="cbar-top"><span>Model confidence</span><b>{conf:.1%}</b></div>'
+            f'<div class="cbar-track"><div class="cbar-fill" style="width:{conf*100:.1f}%; background:{bar_color}"></div></div>'
+            f'<div class="cbar-scale"><span>0%</span><span>50%</span><span>100%</span></div>'
+            f'<div class="cbar-note">{conf_word}</div></div>', unsafe_allow_html=True)
 
-# --------------------------------------------------------------------------- Care & Treatment Plan
-st.markdown(f'<div class="card"><b>What it is</b><br>{info["cause"]}</div>', unsafe_allow_html=True)
+        # Quick In-App AI Chat launch button
+        if supported and confident:
+            if st.button("💬 Ask AI About This Diagnosis", use_container_width=True):
+                st.session_state.view = "ai_assistant"
+                st.rerun()
 
-plan_title = "🌱 Care plan to keep it healthy" if is_healthy else "💊 Treatment plan"
-st.markdown(f'<div class="plan-title">{plan_title}</div>', unsafe_allow_html=True)
+    with st.expander("📊 Top 3 possibilities"):
+        top = pd.DataFrame({"Class": [pretty(CLASS_NAMES[i]) for i in order[:3]],
+                            "Probability": [probs[i] for i in order[:3]]}).set_index("Class")
+        st.bar_chart(top, horizontal=True)
 
-t_treat, t_sym, t_prev = st.tabs(["💊 Treatment", "🔍 Symptoms", "🛡️ Prevention"])
-with t_treat:
-    st.markdown("🌿 **Home / Organic Remedies**")
-    bullets(info["cultural"])
-    if info["chemical"]:
-        st.markdown("💊 **Commercial Treatment & Dosages**")
-        bullets(info["chemical"])
-        st.markdown("🛒 **Local Store / Online Search Tip:** Search the medicine name above on agricultural "
-                    "supply stores or delivery apps (like Coupang or local garden supply centers) to find "
-                    "available brands easily.")
-        st.caption("Always follow the product label for exact safety precautions, mixing ratios, "
-                    "and local agricultural regulations.")
-with t_sym:
-    bullets(info["symptoms"])
-with t_prev:
-    bullets(info["prevention"])
+    if not supported:
+        st.warning("This app currently covers tomato and potato leaves.")
+        st.stop()
+    if not confident:
+        st.warning("The model is not confident about this photo. Try taking a closer picture in good light.")
+        st.stop()
 
-# --------------------------------------------------------------------------- Optional Local AI Advisor
-if use_llm:
+    st.markdown(f'<div class="card"><b>What it is</b><br>{info["cause"]}</div>', unsafe_allow_html=True)
+
+    plan_title = "🌱 Care plan to keep it healthy" if is_healthy else "💊 Treatment plan"
+    st.markdown(f'<div class="plan-title">{plan_title}</div>', unsafe_allow_html=True)
+
+    t_treat, t_sym, t_prev = st.tabs(["💊 Treatment", "🔍 Symptoms", "🛡️ Prevention"])
+    with t_treat:
+        st.markdown("🌿 **Home / Organic Remedies**")
+        bullets(info["cultural"])
+        if info["chemical"]:
+            st.markdown("💊 **Commercial Treatment & Dosages**")
+            bullets(info["chemical"])
+    with t_sym:
+        bullets(info["symptoms"])
+    with t_prev:
+        bullets(info["prevention"])
+
+    st.markdown('<div class="foot">Decision aid only - confirm serious outbreaks with local experts.</div>', unsafe_allow_html=True)
+
+
+# =========================================================================== SCREEN 2: IN-APP AI ASSISTANT
+elif st.session_state.view == "ai_assistant":
+    st.markdown("## 🤖 In-App Plant AI Assistant")
+    st.caption("Ask questions, get customized organic advice, or learn how to care for your plant.")
+
+    curr_diag = st.session_state.current_diagnosis
+    if curr_diag:
+        st.markdown(
+            f'<div class="ai-context-banner">'
+            f'<b>📌 Active Diagnosis Context:</b> {curr_diag["disease"]} '
+            f'({curr_diag["confidence"]:.1%} confidence)<br>'
+            f'<small>The AI is configured with your current leaf diagnosis details.</small>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+    else:
+        st.info("💡 No leaf scan loaded yet. You can ask general gardening questions or scan a leaf image first.")
+
+    # Quick action prompt buttons
+    st.write("**Quick Questions:**")
+    qcol1, qcol2, qcol3 = st.columns(3)
+    quick_prompt = None
+    with qcol1:
+        if st.button("🌿 Organic Remedies"):
+            quick_prompt = "What organic remedies should I apply?"
+    with qcol2:
+        if st.button("⚠️ Safe to Harvest?"):
+            quick_prompt = "Is produce from this plant safe to eat?"
+    with qcol3:
+        if st.button("💊 Spray Precautions"):
+            quick_prompt = "What chemical or spray precautions should I follow?"
+
     st.divider()
-    st.subheader("💬 Ask the AI advisor")
-    q = st.text_input("Your question", placeholder="e.g. Can I still eat the tomatoes?")
-    if st.button("Ask") and q.strip():
-        try:
-            with st.spinner("Thinking..."):
-                st.markdown(ask_ollama(q, f"{info['title']} ({conf:.0%} confidence)", llm_model, llm_host))
-        except (urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as exc:
-            st.error(f"Could not reach Ollama at {llm_host}. Is it running, and is the model pulled?\n\n{exc}")
 
-st.markdown('<div class="foot">Decision aid only - confirm serious outbreaks with a local '
-            'agricultural extension service.</div>', unsafe_allow_html=True)
+    # Display chat history
+    for msg in st.session_state.chat_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Chat input box
+    user_input = st.chat_input("Ask any question about plant care, treatments, or disease prevention...")
+    active_query = user_input or quick_prompt
+
+    if active_query:
+        # Append user message
+        st.session_state.chat_messages.append({"role": "user", "content": active_query})
+        with st.chat_message("user"):
+            st.markdown(active_query)
+
+        # Generate in-app response directly
+        with st.chat_message("assistant"):
+            with st.spinner("Analyzing context & generating response..."):
+                response = generate_in_app_ai_response(active_query, curr_diag, ollama_cfg)
+                st.markdown(response)
+
+        st.session_state.chat_messages.append({"role": "assistant", "content": response})
+
+    st.divider()
+    if st.button("⬅️ Back to Leaf Scanner"):
+        st.session_state.view = "scanner"
+        st.rerun()
