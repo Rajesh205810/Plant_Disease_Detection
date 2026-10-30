@@ -37,8 +37,12 @@ ADVISOR_PROMPT = (
     "local agricultural extension service."
 )
 
-st.set_page_config(page_title="Plant Disease Detection", page_icon="🌿", layout="centered",
-                   initial_sidebar_state="collapsed")
+st.set_page_config(
+    page_title="Plant Disease Detection",
+    page_icon="🌿",
+    layout="centered",
+    initial_sidebar_state="expanded"
+)
 
 # --------------------------------------------------------------------------- styling
 CSS = """
@@ -122,6 +126,35 @@ header[data-testid="stHeader"] {background: transparent !important;}
        border: 0; color:#fff; background: linear-gradient(120deg,#1b8a3a,#7cb342); transition: transform .15s;}
 .stButton > button:hover, .stFormSubmitButton > button:hover {transform: scale(1.02); color:#fff;}
 
+/* ---- sidebar AI links ---- */
+.ai-link-card {
+    text-decoration: none !important;
+    padding: 10px 14px;
+    margin: 6px 0;
+    background: rgba(76, 175, 80, 0.12);
+    border: 1px solid rgba(76, 175, 80, 0.35);
+    border-radius: 14px;
+    color: inherit !important;
+    font-weight: 600;
+    font-size: 0.9rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    transition: all 0.2s ease;
+}
+.ai-link-card:hover {
+    background: rgba(76, 175, 80, 0.25);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+.ai-badge {
+    font-size: 0.72rem;
+    padding: 2px 8px;
+    background: rgba(76, 175, 80, 0.25);
+    border-radius: 99px;
+    opacity: 0.85;
+}
+
 /* ---- login ---- */
 .lock {text-align:center; margin: 6vh auto 10px; max-width: 420px;}
 .lock .icon {font-size: 3.4rem; animation: floaty 5s ease-in-out infinite; display:inline-block;}
@@ -154,292 +187,3 @@ POTATO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
 <path d="M30 40 C40 30 58 30 70 38" stroke="#e6b868" stroke-width="4" fill="none" stroke-linecap="round" opacity=".7"/>
 <circle cx="40" cy="58" r="2.6" fill="#8d5a1e"/><circle cx="58" cy="52" r="2.6" fill="#8d5a1e"/>
 <circle cx="66" cy="68" r="2.6" fill="#8d5a1e"/><circle cx="46" cy="72" r="2.6" fill="#8d5a1e"/>
-<circle cx="30" cy="62" r="2.2" fill="#8d5a1e"/></svg>"""
-
-st.markdown(CSS, unsafe_allow_html=True)
-
-
-# --------------------------------------------------------------------------- password gate
-def get_password() -> str:
-    """Prefer Streamlit secrets (APP_PASSWORD); fall back to the default below."""
-    try:
-        return str(st.secrets["APP_PASSWORD"])
-    except Exception:
-        return "Rajesh444"
-
-
-def check_password() -> bool:
-    if st.session_state.get("auth_ok"):
-        return True
-
-    st.markdown(HIDE_SIDEBAR, unsafe_allow_html=True)
-    st.markdown('<div class="lock"><div class="icon">🔒</div><h2>Private Access</h2>'
-                '<p>Enter the password to open Plant Disease Detection</p></div>',
-                unsafe_allow_html=True)
-
-    _, mid, _ = st.columns([1, 2, 1])
-    with mid:
-        with st.form("login", clear_on_submit=True):
-            pw = st.text_input("Password", type="password", placeholder="Enter password",
-                               label_visibility="collapsed")
-            go = st.form_submit_button("🔓 Unlock")
-        if go:
-            if hmac.compare_digest(pw.encode(), get_password().encode()):
-                st.session_state["auth_ok"] = True
-                st.rerun()
-            else:
-                time.sleep(1)  # slows brute-force guessing
-                st.error("Wrong password. Please try again.")
-    return False
-
-
-if not check_password():
-    st.stop()
-
-
-# --------------------------------------------------------------------------- model
-@st.cache_resource(show_spinner="Loading AI model (downloading if needed)...")
-def load_model():
-    import tensorflow as tf
-
-    if not MODEL_PATH.exists():
-        gdrive_url = "https://drive.google.com/uc?id=1wuHFBZs-76upHrPybchq4LZbh8khOTAP&export=download"
-        gdown.download(gdrive_url, str(MODEL_PATH), quiet=False)
-
-    return tf.keras.models.load_model(MODEL_PATH, compile=False)
-
-
-def preprocess(img: Image.Image, mode: str) -> np.ndarray:
-    img = ImageOps.exif_transpose(img).convert("RGB").resize(IMG_SIZE, Image.BILINEAR)
-    arr = np.asarray(img, dtype="float32")
-    if mode == "div255":
-        arr = arr / 255.0
-    elif mode == "xception":
-        arr = arr / 127.5 - 1.0
-    return np.expand_dims(arr, 0)
-
-
-@st.cache_data(show_spinner=False, max_entries=32)
-def predict(image_bytes: bytes, mode: str) -> list:
-    model = load_model()
-    img = Image.open(io.BytesIO(image_bytes))
-    probs = model.predict(preprocess(img, mode), verbose=0)[0]
-    return [float(p) for p in probs]
-
-
-# --------------------------------------------------------------------------- helpers
-def pretty(class_name: str) -> str:
-    crop, _, cond = class_name.partition("___")
-    crop = crop.replace("_", " ").replace(",", "")
-    cond = cond.replace("_", " ").strip()
-    return f"{crop} - {cond}"
-
-
-def crop_of(class_name: str) -> str:
-    return class_name.split("___")[0].split("_")[0].split(",")[0]
-
-
-def ask_ollama(question: str, context: str, model_name: str, host: str) -> str:
-    payload = json.dumps({
-        "model": model_name,
-        "stream": False,
-        "messages": [
-            {"role": "system", "content": ADVISOR_PROMPT},
-            {"role": "user", "content": f"Diagnosis from image model: {context}\n\nQuestion: {question}"},
-        ],
-    }).encode("utf-8")
-    req = urllib.request.Request(f"{host.rstrip('/')}/api/chat", data=payload,
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=180) as resp:
-        return json.loads(resp.read())["message"]["content"]
-
-
-def bullets(items):
-    for item in items:
-        st.markdown(f"- {item}")
-
-
-def crop_visual(name: str, svg: str) -> str:
-    for ext in ("jpg", "jpeg", "png", "webp"):
-        p = BASE_DIR / "images" / f"{name}.{ext}"
-        if p.exists():
-            b64 = base64.b64encode(p.read_bytes()).decode()
-            return f'<img src="data:image/{ext};base64,{b64}">'
-    return svg
-
-
-def hero_and_crops():
-    st.markdown(
-        '<div class="hero"><span class="leaf l1">🍃</span><span class="leaf l2">🌿</span>'
-        '<span class="leaf l3">🍀</span><h1>🌿 Plant Disease Detection</h1>'
-        '<p>Snap or upload a leaf photo and get an instant AI diagnosis with treatment advice</p></div>',
-        unsafe_allow_html=True)
-    st.markdown(
-        '<div class="steps"><div class="step"><b>📸</b>1. Add leaf photo</div>'
-        '<div class="step"><b>🧠</b>2. AI analyses it</div>'
-        '<div class="step"><b>💊</b>3. Get treatment plan</div></div>',
-        unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="crops">'
-        f'<div class="crop">{crop_visual("tomato", TOMATO_SVG)}<b>Tomato</b><span>9 diseases + healthy</span></div>'
-        f'<div class="crop">{crop_visual("potato", POTATO_SVG)}<b>Potato</b><span>2 diseases + healthy</span></div>'
-        f'</div>', unsafe_allow_html=True)
-
-
-# --------------------------------------------------------------------------- sidebar
-with st.sidebar:
-    st.header("⚙️ Settings")
-    threshold = st.slider("Minimum confidence", 40, 95, 70, 5, format="%d%%") / 100
-    with st.expander("Advanced"):
-        mode_label = st.selectbox(
-            "Image scaling used in training", list(PREPROCESS_MODES),
-            help="Must match how the model was trained. If healthy leaves look wrong, try another option.")
-    use_llm = st.toggle("AI advisor (Ollama)", value=False,
-                        help="Optional. Needs Ollama installed and a model pulled, e.g. 'ollama pull llama3.2'.")
-    if use_llm:
-        llm_model = st.text_input("Ollama model", "llama3.2")
-        llm_host = st.text_input("Ollama address", "http://localhost:11434")
-    st.divider()
-    if st.button("🚪 Log out"):
-        st.session_state["auth_ok"] = False
-        st.rerun()
-
-mode = PREPROCESS_MODES[mode_label]
-
-# --------------------------------------------------------------------------- main page
-hero_and_crops()
-
-tab_up, tab_cam = st.tabs(["📁 Upload photo", "📷 Use camera"])
-with tab_up:
-    uploaded = st.file_uploader("Choose a leaf image", type=["jpg", "jpeg", "png", "webp"],
-                                label_visibility="collapsed")
-with tab_cam:
-    camera = st.camera_input("Take a photo of the leaf", label_visibility="collapsed")
-
-source = uploaded or camera
-if source is None:
-    st.info("💡 Tip: use a close, well-lit photo of ONE leaf on a plain background.")
-    st.markdown('<div class="foot">Decision aid only - confirm serious outbreaks with a local '
-                'agricultural extension service.</div>', unsafe_allow_html=True)
-    st.stop()
-
-image_bytes = source.getvalue()
-try:
-    image = ImageOps.exif_transpose(Image.open(io.BytesIO(image_bytes))).convert("RGB")
-except Exception:
-    st.error("That file could not be read as an image. Please try another photo.")
-    st.stop()
-
-try:
-    with st.spinner("🔬 Analysing leaf..."):
-        probs = predict(image_bytes, mode)
-except Exception as exc:
-    st.error("The model could not run. This is usually a TensorFlow/Keras version mismatch.")
-    st.code(f"{type(exc).__name__}: {exc}")
-    st.info("Fix: `pip install -U \"tensorflow>=2.18\"`, then restart the app.")
-    st.stop()
-
-if len(probs) != len(CLASS_NAMES):
-    st.error(f"Model has {len(probs)} outputs but the app expects {len(CLASS_NAMES)} classes. "
-             "Update CLASS_NAMES in disease_info.py to match your training order.")
-    st.stop()
-
-order = np.argsort(probs)[::-1]
-best = int(order[0])
-best_name, conf = CLASS_NAMES[best], probs[best]
-info = DISEASE_INFO.get(best_name)
-
-# --------------------------------------------------------------------------- verdict
-supported = crop_of(best_name) in SUPPORTED_CROPS and info is not None
-confident = conf >= threshold
-severity = info["severity"] if supported else "none"
-is_healthy = supported and severity == "none"
-
-if conf >= 0.85:
-    bar_color, conf_word = "linear-gradient(90deg,#2e7d32,#66bb6a)", "High confidence"
-elif conf >= 0.65:
-    bar_color, conf_word = "linear-gradient(90deg,#ef6c00,#ffb300)", "Medium confidence"
-else:
-    bar_color, conf_word = "linear-gradient(90deg,#c62828,#ef5350)", "Low confidence"
-
-col_img, col_res = st.columns([1, 1.3], gap="large")
-with col_img:
-    st.image(image, caption="Your leaf", use_container_width=True)
-
-with col_res:
-    if not supported:
-        st.markdown('<div class="verdict v-moderate"><div class="vicon">🤔</div><div>'
-                    '<h2>Not a tomato or potato leaf</h2>'
-                    f'<p>Looks like: {pretty(best_name)}</p></div></div>', unsafe_allow_html=True)
-    elif not confident:
-        st.markdown('<div class="verdict v-moderate"><div class="vicon">❓</div><div>'
-                    '<h2>Result not clear</h2>'
-                    '<p>The model is not sure about this photo. Please retake it.</p></div></div>',
-                    unsafe_allow_html=True)
-    elif is_healthy:
-        st.markdown('<div class="verdict v-healthy"><div class="vicon">🌱</div><div>'
-                    '<h2>Your plant is healthy</h2>'
-                    '<p>No disease or issue was found on this leaf.</p></div></div>',
-                    unsafe_allow_html=True)
-    else:
-        icon = {"moderate": "⚠️", "high": "🚨", "incurable": "🛑"}.get(severity, "⚠️")
-        st.markdown(f'<div class="verdict v-{severity}"><div class="vicon">{icon}</div><div>'
-                    '<h2>Your plant has a disease</h2>'
-                    f'<p>Detected: <b>{info["title"]}</b></p></div></div>', unsafe_allow_html=True)
-
-    st.markdown(
-        f'<div class="cbar"><div class="cbar-top"><span>Model confidence</span><b>{conf:.1%}</b></div>'
-        f'<div class="cbar-track"><div class="cbar-fill" style="width:{conf*100:.1f}%; background:{bar_color}"></div></div>'
-        f'<div class="cbar-scale"><span>0%</span><span>50%</span><span>100%</span></div>'
-        f'<div class="cbar-note">{conf_word}</div></div>', unsafe_allow_html=True)
-
-with st.expander("📊 Top 3 possibilities"):
-    top = pd.DataFrame({"Class": [pretty(CLASS_NAMES[i]) for i in order[:3]],
-                        "Probability": [probs[i] for i in order[:3]]}).set_index("Class")
-    st.bar_chart(top, horizontal=True)
-
-if not supported:
-    st.warning("This app only covers tomato and potato leaves. Please upload one of those.")
-    st.stop()
-if not confident:
-    st.warning("The model is **not confident** about this photo. Retake it closer, in daylight, "
-               "with one leaf filling most of the frame, and avoid blur or heavy shadows.")
-    st.stop()
-
-# --------------------------------------------------------------------------- about + treatment plan (below)
-st.markdown(f'<div class="card"><b>What it is</b><br>{info["cause"]}</div>', unsafe_allow_html=True)
-
-plan_title = "🌱 Care plan to keep it healthy" if is_healthy else "💊 Treatment plan"
-st.markdown(f'<div class="plan-title">{plan_title}</div>', unsafe_allow_html=True)
-
-t_treat, t_sym, t_prev = st.tabs(["💊 Treatment", "🔍 Symptoms", "🛡️ Prevention"])
-with t_treat:
-    st.markdown("🌿 **Home / Organic Remedies**")
-    bullets(info["cultural"])
-    if info["chemical"]:
-        st.markdown("💊 **Commercial Treatment & Dosages**")
-        bullets(info["chemical"])
-        st.markdown("🛒 **Local Store / Online Search Tip:** Search the medicine name above on agricultural "
-                    "supply stores or delivery apps (like Coupang or local garden supply centers) to find "
-                    "available brands easily.")
-        st.caption("Always follow the product label for exact safety precautions, mixing ratios, "
-                   "and local agricultural regulations.")
-with t_sym:
-    bullets(info["symptoms"])
-with t_prev:
-    bullets(info["prevention"])
-
-# --------------------------------------------------------------------------- optional AI advisor
-if use_llm:
-    st.divider()
-    st.subheader("💬 Ask the AI advisor")
-    q = st.text_input("Your question", placeholder="e.g. Can I still eat the tomatoes?")
-    if st.button("Ask") and q.strip():
-        try:
-            with st.spinner("Thinking..."):
-                st.markdown(ask_ollama(q, f"{info['title']} ({conf:.0%} confidence)", llm_model, llm_host))
-        except (urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as exc:
-            st.error(f"Could not reach Ollama at {llm_host}. Is it running, and is the model pulled?\n\n{exc}")
-
-st.markdown('<div class="foot">Decision aid only - confirm serious outbreaks with a local '
-            'agricultural extension service.</div>', unsafe_allow_html=True)
