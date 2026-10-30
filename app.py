@@ -1,7 +1,6 @@
 """Plant Disease Detection & Open-Source AI Assistant - Streamlit App.
 
 Run:  streamlit run app.py
-Needs: disease_info.py next to this file, and model.h5 (auto-downloads if missing).
 """
 import base64
 import hmac
@@ -37,7 +36,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --------------------------------------------------------------------------- Session State Setup
+# Session State Setup
 if "view" not in st.session_state:
     st.session_state.view = "scanner"
 if "chat_messages" not in st.session_state:
@@ -47,29 +46,25 @@ if "current_diagnosis" not in st.session_state:
 if "show_welcome_popup" not in st.session_state:
     st.session_state.show_welcome_popup = True
 
-# --------------------------------------------------------------------------- CSS Styling
+# CSS Styling (Includes Hover Highlighting and Hides Streamlit Cloud Chrome)
 CSS = """
 <style>
-/* ---- Hide Streamlit Toolbar, Edit Code, and Footer ---- */
 #MainMenu, footer, header [data-testid="stToolbar"], [data-testid="stToolbar"],
 [data-testid="stDeployButton"], [data-testid="stAppDeployButton"],
-[data-testid="stDecoration"], [data-testid="stStatusWidget"],
-.stDeployButton, .viewerBadge_container__r5tak, [class*="viewerBadge"],
-a[href*="github.com"][target="_blank"], a[href*="github.com"] {display: none !important; visibility: hidden !important;}
+[data-testid="stDecoration"], [data-testid="stStatusWidget"] {display: none !important; visibility: hidden !important;}
 header[data-testid="stHeader"] {background: transparent !important;}
 
 .block-container {padding: 1.2rem 1rem 3rem; max-width: 880px;}
 @keyframes flow {0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%}}
 @keyframes floaty {0%,100%{transform:translateY(0) rotate(-6deg)} 50%{transform:translateY(-10px) rotate(6deg)}}
 @keyframes pop {from{opacity:0; transform:translateY(14px)} to{opacity:1; transform:none}}
-@keyframes grow {from{width:0}}
 
 .hero {position: relative; overflow: hidden; border-radius: 26px; padding: 34px 22px 28px;
        text-align: center; color: #fff; margin-bottom: 18px;
        background: linear-gradient(120deg,#0b3d1e,#1b8a3a,#7cb342,#1b8a3a,#0b3d1e);
        background-size: 300% 300%; animation: flow 14s ease infinite;
        box-shadow: 0 14px 40px rgba(27,138,58,.35);}
-.hero h1 {color:#fff; margin:0; font-size: clamp(1.6rem, 5.5vw, 2.5rem); font-weight: 800; letter-spacing:.3px;}
+.hero h1 {color:#fff; margin:0; font-size: clamp(1.6rem, 5.5vw, 2.5rem); font-weight: 800;}
 .hero p {color:#eaf7ea; margin:8px auto 0; max-width: 560px; font-size: clamp(.9rem, 2.8vw, 1.05rem);}
 .hero .leaf {position:absolute; font-size: 2.4rem; opacity:.22; animation: floaty 6s ease-in-out infinite;}
 .hero .l1 {left: 5%; top: 14%;} .hero .l2 {right: 6%; top: 40%; animation-delay: 1.5s; font-size:3rem;}
@@ -77,12 +72,8 @@ header[data-testid="stHeader"] {background: transparent !important;}
 
 .welcome-popup {
     background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-    border: 2px solid #4caf50;
-    border-radius: 20px;
-    padding: 20px 24px;
-    margin-bottom: 20px;
-    box-shadow: 0 6px 20px rgba(76,175,80,0.15);
-    animation: pop 0.4s ease-out;
+    border: 2px solid #4caf50; border-radius: 20px; padding: 20px 24px;
+    margin-bottom: 20px; box-shadow: 0 6px 20px rgba(76,175,80,0.15); animation: pop 0.4s ease-out;
 }
 .welcome-popup h3 {color: #1b5e20; margin: 0 0 6px 0; font-size: 1.35rem;}
 .welcome-popup p {color: #2e7d32; margin: 0; font-size: 0.98rem; line-height: 1.4;}
@@ -92,7 +83,7 @@ header[data-testid="stHeader"] {background: transparent !important;}
        background: rgba(76,175,80,.10); border:1px solid rgba(76,175,80,.30); animation: pop .6s both;}
 .step b {display:block; font-size:1.5rem;}
 
-/* ---- Crop Cards with Hover Highlighting Animation ---- */
+/* Crop Cards with Hover Highlighting Animation */
 .crops {display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-bottom:20px;}
 .crop {border-radius:20px; padding:16px 10px 14px; text-align:center; 
        transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease, background 0.3s ease;
@@ -138,12 +129,12 @@ header[data-testid="stHeader"] {background: transparent !important;}
 """
 
 HIDE_SIDEBAR = "<style>[data-testid='stSidebar'] {display:none !important;}</style>"
-
 TOMATO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><circle cx="50" cy="56" r="34" fill="#e53935"/><path d="M50 24 L43 14 L50 19 L57 14 Z" fill="#2e7d32"/><rect x="48" y="10" width="4" height="12" rx="2" fill="#1b5e20"/></svg>"""
 POTATO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"><path d="M18 58 C14 36 34 22 56 26 C78 30 90 46 82 66 C74 84 40 88 26 76 Z" fill="#c8923f"/></svg>"""
 
 st.markdown(CSS, unsafe_allow_html=True)
 
+# Password Protection Gate
 def get_password() -> str:
     try:
         return str(st.secrets["APP_PASSWORD"])
@@ -172,6 +163,7 @@ def check_password() -> bool:
 if not check_password():
     st.stop()
 
+# Model and Helpers
 @st.cache_resource(show_spinner="Loading AI model...")
 def load_model():
     import tensorflow as tf
@@ -264,8 +256,9 @@ def crop_visual(name: str, svg: str) -> str:
 def hero_and_crops():
     st.markdown('<div class="hero"><h1>🌿 Plant Disease Detection</h1><p>Snap or upload a leaf photo and get an instant AI diagnosis</p></div>', unsafe_allow_html=True)
     st.markdown('<div class="steps"><div class="step"><b>📸</b>1. Add photo</div><div class="step"><b>🧠</b>2. AI analyses</div><div class="step"><b>💊</b>3. Treatment plan</div></div>', unsafe_allow_html=True)
-    st.markdown(f'<div class="crops"><div class="crop">{crop_visual("tomato", TOMATO_SVG)}<b>Tomato</b><span>9 diseases + healthy</span></div><div class="crop">{crop_visual("potato", POTATO_SVG)}<b>Potato</b><span>2 diseases + healthy</span></div></div>', unsafe_allow_html=True)
-    # --------------------------------------------------------------------------- Sidebar & Open-Source AI Features
+    st.markdown(f'<div class="crops"><div class="crop">{crop_visual("tomato", TOMATO_SVG)}<b>Tomato</b><span>10 diseases + healthy</span></div><div class="crop">{crop_visual("potato", POTATO_SVG)}<b>Potato</b><span>2 diseases + healthy</span></div></div>', unsafe_allow_html=True)
+
+# Sidebar & Navigation
 with st.sidebar:
     st.header("🧭 App Navigation")
     col_v1, col_v2 = st.columns(2)
@@ -293,7 +286,7 @@ with st.sidebar:
 
 mode = PREPROCESS_MODES[mode_label]
 
-# =========================================================================== SCREEN 1: LEAF SCANNER
+# SCREEN 1: LEAF SCANNER
 if st.session_state.view == "scanner":
     if st.session_state.show_welcome_popup:
         col_p1, col_p2 = st.columns([12, 1])
@@ -404,8 +397,7 @@ if st.session_state.view == "scanner":
 
     st.markdown('<div class="foot">Decision aid only - confirm serious outbreaks with local experts.</div>', unsafe_allow_html=True)
 
-
-# =========================================================================== SCREEN 2: IN-APP OPEN-SOURCE AI ASSISTANT
+# SCREEN 2: IN-APP OPEN-SOURCE AI ASSISTANT
 elif st.session_state.view == "ai_assistant":
     st.markdown("## 🤖 In-App Open-Source AI Assistant")
     st.caption("Answers are dynamically fetched from open sources & synthesized in the app backend.")
