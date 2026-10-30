@@ -56,6 +56,7 @@ header[data-testid="stHeader"] {background: transparent !important;}
 @keyframes flow {0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%}}
 @keyframes floaty {0%,100%{transform:translateY(0) rotate(-6deg)} 50%{transform:translateY(-10px) rotate(6deg)}}
 @keyframes pop {from{opacity:0; transform:translateY(14px)} to{opacity:1; transform:none}}
+@keyframes grow {from{width:0}}
 
 /* ---- hero ---- */
 .hero {position: relative; overflow: hidden; border-radius: 26px; padding: 34px 22px 28px;
@@ -86,27 +87,33 @@ header[data-testid="stHeader"] {background: transparent !important;}
 .crop b {display:block; margin-top:8px; font-size:1.05rem;}
 .crop span {font-size:.82rem; opacity:.75;}
 
-/* ---- results ---- */
-.banner {border-radius:18px; padding:16px 20px; margin:12px 0 14px; color:#fff; font-weight:700;
-         font-size: clamp(.95rem, 3.4vw, 1.15rem); animation: pop .5s both;
-         box-shadow: 0 8px 24px rgba(0,0,0,.18);}
-.b-none {background: linear-gradient(120deg,#1b5e20,#43a047);}
-.b-moderate {background: linear-gradient(120deg,#e65100,#ffa000);}
-.b-high {background: linear-gradient(120deg,#b71c1c,#ef5350);}
-.b-incurable {background: linear-gradient(120deg,#3e0a0a,#8e1b1b);}
+/* ---- result cards ---- */
 .card {border-radius:16px; padding:14px 18px; margin:8px 0; animation: pop .5s both;
        background: rgba(128,128,128,.08); border:1px solid rgba(128,128,128,.2);}
-.stat {text-align:center; border-radius:16px; padding:12px; background: rgba(76,175,80,.10);
-       border:1px solid rgba(76,175,80,.3);}
-.stat small {opacity:.7; display:block;} .stat b {font-size:1.2rem;}
 
-.ringwrap {position:relative; width:130px; height:130px; margin: 10px auto 0;}
-.ring {position:absolute; inset:0; border-radius:50%;
-       background: conic-gradient(var(--c) calc(var(--p) * 1%), rgba(128,128,128,.22) 0);
-       -webkit-mask: radial-gradient(farthest-side, transparent 66%, #000 67%);
-               mask: radial-gradient(farthest-side, transparent 66%, #000 67%);}
-.ringtxt {position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;}
-.ringtxt b {font-size:1.6rem;} .ringtxt small {opacity:.65; margin-top:-2px;}
+/* ---- verdict card ---- */
+.verdict {display:flex; align-items:center; gap:16px; border-radius:22px; padding:20px 22px; color:#fff;
+          animation: pop .5s both; box-shadow: 0 10px 30px rgba(0,0,0,.2);}
+.verdict .vicon {font-size: clamp(2.2rem, 9vw, 3.2rem); line-height:1;}
+.verdict h2 {color:#fff; margin:0; padding:0; font-size: clamp(1.15rem, 4.6vw, 1.7rem); font-weight:800;}
+.verdict p {color:rgba(255,255,255,.92); margin:4px 0 0; font-size: clamp(.85rem, 3vw, 1rem);}
+.v-healthy {background: linear-gradient(120deg,#1b5e20,#43a047,#9ccc65);}
+.v-moderate {background: linear-gradient(120deg,#e65100,#ffa000);}
+.v-high {background: linear-gradient(120deg,#b71c1c,#ef5350);}
+.v-incurable {background: linear-gradient(120deg,#3e0a0a,#8e1b1b);}
+.v-none {background: linear-gradient(120deg,#1b5e20,#43a047,#9ccc65);}
+
+/* ---- confidence bar ---- */
+.cbar {margin: 14px 0 6px; padding: 14px 16px; border-radius:16px; animation: pop .5s both;
+       background: rgba(128,128,128,.08); border:1px solid rgba(128,128,128,.2);}
+.cbar-top {display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;}
+.cbar-top span {opacity:.75; font-size:.9rem;} .cbar-top b {font-size:1.35rem;}
+.cbar-track {height:16px; border-radius:99px; background: rgba(128,128,128,.25); overflow:hidden;}
+.cbar-fill {height:100%; border-radius:99px; animation: grow 1.1s ease-out;}
+.cbar-scale {display:flex; justify-content:space-between; font-size:.72rem; opacity:.55; margin-top:6px;}
+.cbar-note {font-size:.85rem; margin-top:6px; opacity:.85;}
+
+.plan-title {font-size: clamp(1.1rem, 4vw, 1.4rem); font-weight:800; margin: 22px 0 4px;}
 
 /* ---- tabs / buttons ---- */
 .stTabs [data-baseweb="tab-list"] {gap: 6px; flex-wrap: wrap;}
@@ -128,6 +135,7 @@ header[data-testid="stHeader"] {background: transparent !important;}
   .hero {padding: 26px 14px 22px; border-radius: 20px;}
   .steps {gap:6px;} .step {font-size:.72rem; padding:10px 4px;} .step b {font-size:1.25rem;}
   .crops {gap:10px;}
+  .verdict {padding: 16px 14px; gap: 12px; margin-top: 10px;}
   .stTabs [data-baseweb="tab"] {padding: 6px 10px; font-size:.85rem;}
 }
 </style>
@@ -278,10 +286,6 @@ def hero_and_crops():
         f'</div>', unsafe_allow_html=True)
 
 
-def conf_color(c: float) -> str:
-    return "#43a047" if c >= 0.85 else "#ffa000" if c >= 0.65 else "#e53935"
-
-
 # --------------------------------------------------------------------------- sidebar
 with st.sidebar:
     st.header("⚙️ Settings")
@@ -345,43 +349,70 @@ best = int(order[0])
 best_name, conf = CLASS_NAMES[best], probs[best]
 info = DISEASE_INFO.get(best_name)
 
-col_img, col_res = st.columns([1, 1.2], gap="large")
+# --------------------------------------------------------------------------- verdict
+supported = crop_of(best_name) in SUPPORTED_CROPS and info is not None
+confident = conf >= threshold
+severity = info["severity"] if supported else "none"
+is_healthy = supported and severity == "none"
+
+if conf >= 0.85:
+    bar_color, conf_word = "linear-gradient(90deg,#2e7d32,#66bb6a)", "High confidence"
+elif conf >= 0.65:
+    bar_color, conf_word = "linear-gradient(90deg,#ef6c00,#ffb300)", "Medium confidence"
+else:
+    bar_color, conf_word = "linear-gradient(90deg,#c62828,#ef5350)", "Low confidence"
+
+col_img, col_res = st.columns([1, 1.3], gap="large")
 with col_img:
     st.image(image, caption="Your leaf", use_container_width=True)
-with col_res:
-    st.markdown(f'<div class="stat"><small>Prediction</small><b>{pretty(best_name)}</b></div>',
-                unsafe_allow_html=True)
-    st.markdown(
-        f'<div class="ringwrap"><div class="ring" style="--p:{conf*100:.1f}; --c:{conf_color(conf)}"></div>'
-        f'<div class="ringtxt"><b>{conf:.0%}</b><small>confidence</small></div></div>',
-        unsafe_allow_html=True)
 
-top = pd.DataFrame({"Class": [pretty(CLASS_NAMES[i]) for i in order[:3]],
-                    "Probability": [probs[i] for i in order[:3]]}).set_index("Class")
+with col_res:
+    if not supported:
+        st.markdown('<div class="verdict v-moderate"><div class="vicon">🤔</div><div>'
+                    '<h2>Not a tomato or potato leaf</h2>'
+                    f'<p>Looks like: {pretty(best_name)}</p></div></div>', unsafe_allow_html=True)
+    elif not confident:
+        st.markdown('<div class="verdict v-moderate"><div class="vicon">❓</div><div>'
+                    '<h2>Result not clear</h2>'
+                    '<p>The model is not sure about this photo. Please retake it.</p></div></div>',
+                    unsafe_allow_html=True)
+    elif is_healthy:
+        st.markdown('<div class="verdict v-healthy"><div class="vicon">🌱</div><div>'
+                    '<h2>Your plant is healthy</h2>'
+                    '<p>No disease or issue was found on this leaf.</p></div></div>',
+                    unsafe_allow_html=True)
+    else:
+        icon = {"moderate": "⚠️", "high": "🚨", "incurable": "🛑"}.get(severity, "⚠️")
+        st.markdown(f'<div class="verdict v-{severity}"><div class="vicon">{icon}</div><div>'
+                    '<h2>Your plant has a disease</h2>'
+                    f'<p>Detected: <b>{info["title"]}</b></p></div></div>', unsafe_allow_html=True)
+
+    st.markdown(
+        f'<div class="cbar"><div class="cbar-top"><span>Model confidence</span><b>{conf:.1%}</b></div>'
+        f'<div class="cbar-track"><div class="cbar-fill" style="width:{conf*100:.1f}%; background:{bar_color}"></div></div>'
+        f'<div class="cbar-scale"><span>0%</span><span>50%</span><span>100%</span></div>'
+        f'<div class="cbar-note">{conf_word}</div></div>', unsafe_allow_html=True)
+
 with st.expander("📊 Top 3 possibilities"):
+    top = pd.DataFrame({"Class": [pretty(CLASS_NAMES[i]) for i in order[:3]],
+                        "Probability": [probs[i] for i in order[:3]]}).set_index("Class")
     st.bar_chart(top, horizontal=True)
 
-if crop_of(best_name) not in SUPPORTED_CROPS:
-    st.warning(f"This looks like **{pretty(best_name)}**, which this app does not cover. "
-               "Please upload a tomato or potato leaf.")
+if not supported:
+    st.warning("This app only covers tomato and potato leaves. Please upload one of those.")
     st.stop()
-if conf < threshold:
+if not confident:
     st.warning("The model is **not confident** about this photo. Retake it closer, in daylight, "
                "with one leaf filling most of the frame, and avoid blur or heavy shadows.")
     st.stop()
 
-# -------- diagnosis
-severity = info["severity"]
-label = {"none": "✅ Healthy leaf - no treatment needed",
-         "moderate": f"⚠️ {info['title']} - treat promptly",
-         "high": f"🚨 {info['title']} - spreads fast, act today",
-         "incurable": f"🛑 {info['title']} - no cure, protect the rest of the crop"}[severity]
-st.markdown(f'<div class="banner b-{severity}">{label}</div>', unsafe_allow_html=True)
+# --------------------------------------------------------------------------- about + treatment plan (below)
 st.markdown(f'<div class="card"><b>What it is</b><br>{info["cause"]}</div>', unsafe_allow_html=True)
 
-t_sym, t_treat, t_prev = st.tabs(["🔍 Symptoms", "💊 Treatment", "🛡️ Prevention"])
-with t_sym:
-    bullets(info["symptoms"])
+plan_title = "🌱 Care plan to keep it healthy" if is_healthy else "💊 Treatment plan"
+st.markdown(f'<div class="plan-title">{plan_title}</div>', unsafe_allow_html=True)
+
+t_treat, t_sym, t_prev = st.tabs(["💊 Treatment", "🔍 Symptoms", "🛡️ Prevention"])
 with t_treat:
     st.markdown("🌿 **Home / Organic Remedies**")
     bullets(info["cultural"])
@@ -393,10 +424,12 @@ with t_treat:
                     "available brands easily.")
         st.caption("Always follow the product label for exact safety precautions, mixing ratios, "
                    "and local agricultural regulations.")
+with t_sym:
+    bullets(info["symptoms"])
 with t_prev:
     bullets(info["prevention"])
 
-# -------- optional AI advisor
+# --------------------------------------------------------------------------- optional AI advisor
 if use_llm:
     st.divider()
     st.subheader("💬 Ask the AI advisor")
