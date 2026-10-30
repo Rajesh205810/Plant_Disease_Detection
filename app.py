@@ -249,7 +249,36 @@ def hero_and_crops():
     st.markdown('<div class="hero"><h1>🌿 Plant Disease Detection</h1><p>Snap or upload a leaf photo and get an instant AI diagnosis</p></div>', unsafe_allow_html=True)
     st.markdown('<div class="steps"><div class="step"><b>📸</b>1. Add photo</div><div class="step"><b>🧠</b>2. AI analyses</div><div class="step"><b>💊</b>3. Treatment plan</div></div>', unsafe_allow_html=True)
     st.markdown(f'<div class="crops"><div class="crop">{crop_visual("tomato", TOMATO_SVG)}<b>Tomato</b><span>9 diseases + healthy</span></div><div class="crop">{crop_visual("potato", POTATO_SVG)}<b>Potato</b><span>2 diseases + healthy</span></div></div>', unsafe_allow_html=True)
-    if st.session_state.view == "scanner":
+    # --------------------------------------------------------------------------- Sidebar & Open-Source AI Features
+with st.sidebar:
+    st.header("🧭 App Navigation")
+    col_v1, col_v2 = st.columns(2)
+    with col_v1:
+        if st.button("🌿 Scanner", use_container_width=True):
+            st.session_state.view = "scanner"
+            st.rerun()
+    with col_v2:
+        if st.button("🤖 AI Chat", use_container_width=True):
+            st.session_state.view = "ai_assistant"
+            st.rerun()
+
+    st.divider()
+    st.header("⚙️ Settings & Confidence")
+    threshold = st.slider("Minimum confidence score", 40, 95, 70, 5, format="%d%%") / 100
+    
+    with st.expander("Advanced & Open-Source AI"):
+        mode_label = st.selectbox("Image scaling", list(PREPROCESS_MODES))
+        hf_token = st.text_input("HuggingFace Open API Key", type="password", help="Optional token for advanced open-source LLM answers.")
+
+    st.divider()
+    if st.button("🚪 Log out"):
+        st.session_state["auth_ok"] = False
+        st.rerun()
+
+mode = PREPROCESS_MODES[mode_label]
+
+# =========================================================================== SCREEN 1: LEAF SCANNER
+if st.session_state.view == "scanner":
     if st.session_state.show_welcome_popup:
         col_p1, col_p2 = st.columns([12, 1])
         with col_p1:
@@ -302,6 +331,13 @@ def hero_and_crops():
             "chemical": info["chemical"], "prevention": info["prevention"], "is_healthy": is_healthy
         }
 
+    if conf >= 0.85:
+        bar_color, conf_word = "linear-gradient(90deg,#2e7d32,#66bb6a)", "High confidence"
+    elif conf >= 0.65:
+        bar_color, conf_word = "linear-gradient(90deg,#ef6c00,#ffb300)", "Medium confidence"
+    else:
+        bar_color, conf_word = "linear-gradient(90deg,#c62828,#ef5350)", "Low confidence"
+
     col_img, col_res = st.columns([1, 1.3], gap="large")
     with col_img:
         st.image(image, caption="Your leaf", use_container_width=True)
@@ -317,7 +353,11 @@ def hero_and_crops():
             icon = {"moderate": "⚠️", "high": "🚨", "incurable": "🛑"}.get(severity, "⚠️")
             st.markdown(f'<div class="verdict v-{severity}"><div class="vicon">{icon}</div><div><h2>Disease Detected</h2><p><b>{info["title"]}</b></p></div></div>', unsafe_allow_html=True)
 
-        st.markdown(f'<div class="stat"><small>Confidence Score</small><b>{conf:.1%}</b></div>', unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="cbar"><div class="cbar-top"><span>Model confidence</span><b>{conf:.1%}</b></div>'
+            f'<div class="cbar-track"><div class="cbar-fill" style="width:{conf*100:.1f}%; background:{bar_color}"></div></div>'
+            f'<div class="cbar-scale"><span>0%</span><span>50%</span><span>100%</span></div>'
+            f'</div>', unsafe_allow_html=True)
 
         if supported and confident:
             if st.button("💬 Ask AI About This Diagnosis", use_container_width=True):
@@ -347,33 +387,7 @@ def hero_and_crops():
         bullets(info["prevention"])
 
     st.markdown('<div class="foot">Decision aid only - confirm serious outbreaks with local experts.</div>', unsafe_allow_html=True)
-    # --------------------------------------------------------------------------- Sidebar & Open-Source AI Features
-with st.sidebar:
-    st.header("🧭 App Navigation")
-    col_v1, col_v2 = st.columns(2)
-    with col_v1:
-        if st.button("🌿 Scanner", use_container_width=True):
-            st.session_state.view = "scanner"
-            st.rerun()
-    with col_v2:
-        if st.button("🤖 AI Chat", use_container_width=True):
-            st.session_state.view = "ai_assistant"
-            st.rerun()
 
-    st.divider()
-    st.header("⚙️ Settings & Confidence")
-    threshold = st.slider("Minimum confidence score", 40, 95, 70, 5, format="%d%%") / 100
-    
-    with st.expander("Advanced & Open-Source AI"):
-        mode_label = st.selectbox("Image scaling", list(PREPROCESS_MODES))
-        hf_token = st.text_input("HuggingFace Open API Key", type="password", help="Optional token for advanced open-source LLM answers.")
-
-    st.divider()
-    if st.button("🚪 Log out"):
-        st.session_state["auth_ok"] = False
-        st.rerun()
-
-mode = PREPROCESS_MODES[mode_label]
 
 # =========================================================================== SCREEN 2: IN-APP OPEN-SOURCE AI ASSISTANT
 elif st.session_state.view == "ai_assistant":
