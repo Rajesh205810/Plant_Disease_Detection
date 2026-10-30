@@ -1,12 +1,13 @@
-"""Plant Disease Detection - Streamlit app.
+"""Plant Disease Detection - password-protected, responsive Streamlit app.
 
 Run:  streamlit run app.py
-Needs: model.h5 in the same folder as this file (or downloads automatically from Google Drive).
+Needs: disease_info.py next to this file, and model.h5 (auto-downloads from Google Drive if missing).
 """
 import base64
+import hmac
 import io
 import json
-import os
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -21,7 +22,7 @@ from disease_info import CLASS_NAMES, DISEASE_INFO, SUPPORTED_CROPS
 
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "model.h5"
-IMG_SIZE = (224, 224)  # model input: (None, 224, 224, 3)
+IMG_SIZE = (224, 224)
 
 PREPROCESS_MODES = {
     "Divide by 255  (0 to 1)": "div255",
@@ -37,17 +38,163 @@ ADVISOR_PROMPT = (
 )
 
 st.set_page_config(page_title="Plant Disease Detection", page_icon="🌿", layout="centered",
-                    initial_sidebar_state="collapsed")
+                   initial_sidebar_state="collapsed")
+
+# --------------------------------------------------------------------------- styling
+CSS = """
+<style>
+/* ---- hide Streamlit chrome: fork button, GitHub icon, menu, footer, hosted badge ---- */
+#MainMenu, footer, header [data-testid="stToolbar"], [data-testid="stToolbar"],
+[data-testid="stDeployButton"], [data-testid="stAppDeployButton"],
+[data-testid="stDecoration"], [data-testid="stStatusWidget"],
+.stDeployButton, .viewerBadge_container__r5tak, [class*="viewerBadge"],
+a[href*="github.com"][target="_blank"] img {display: none !important; visibility: hidden !important;}
+header[data-testid="stHeader"] {background: transparent !important;}
+
+/* ---- layout ---- */
+.block-container {padding: 1.2rem 1rem 3rem; max-width: 880px;}
+@keyframes flow {0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%}}
+@keyframes floaty {0%,100%{transform:translateY(0) rotate(-6deg)} 50%{transform:translateY(-10px) rotate(6deg)}}
+@keyframes pop {from{opacity:0; transform:translateY(14px)} to{opacity:1; transform:none}}
+
+/* ---- hero ---- */
+.hero {position: relative; overflow: hidden; border-radius: 26px; padding: 34px 22px 28px;
+       text-align: center; color: #fff; margin-bottom: 18px;
+       background: linear-gradient(120deg,#0b3d1e,#1b8a3a,#7cb342,#1b8a3a,#0b3d1e);
+       background-size: 300% 300%; animation: flow 14s ease infinite;
+       box-shadow: 0 14px 40px rgba(27,138,58,.35);}
+.hero h1 {color:#fff; margin:0; font-size: clamp(1.6rem, 5.5vw, 2.5rem); font-weight: 800; letter-spacing:.3px;}
+.hero p {color:#eaf7ea; margin:8px auto 0; max-width: 560px; font-size: clamp(.9rem, 2.8vw, 1.05rem);}
+.hero .leaf {position:absolute; font-size: 2.4rem; opacity:.22; animation: floaty 6s ease-in-out infinite;}
+.hero .l1 {left: 5%; top: 14%;} .hero .l2 {right: 6%; top: 40%; animation-delay: 1.5s; font-size:3rem;}
+.hero .l3 {left: 20%; bottom: 6%; animation-delay: 3s; font-size:1.8rem;}
+
+/* ---- steps ---- */
+.steps {display:grid; grid-template-columns: repeat(3,1fr); gap:10px; margin-bottom:18px;}
+.step {border-radius:16px; padding:12px 8px; text-align:center; font-size:.85rem;
+       background: rgba(76,175,80,.10); border:1px solid rgba(76,175,80,.30); animation: pop .6s both;}
+.step b {display:block; font-size:1.5rem;}
+.step:nth-child(2){animation-delay:.12s} .step:nth-child(3){animation-delay:.24s}
+
+/* ---- crop cards ---- */
+.crops {display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-bottom:20px;}
+.crop {border-radius:20px; padding:16px 10px 14px; text-align:center; transition: transform .25s, box-shadow .25s;
+       background: linear-gradient(160deg, rgba(76,175,80,.16), rgba(76,175,80,.04));
+       border:1px solid rgba(76,175,80,.35); backdrop-filter: blur(6px);}
+.crop:hover {transform: translateY(-4px); box-shadow: 0 10px 26px rgba(76,175,80,.25);}
+.crop svg, .crop img {width: min(96px, 24vw); height: min(96px, 24vw); object-fit: cover; border-radius: 16px;}
+.crop b {display:block; margin-top:8px; font-size:1.05rem;}
+.crop span {font-size:.82rem; opacity:.75;}
+
+/* ---- results ---- */
+.banner {border-radius:18px; padding:16px 20px; margin:12px 0 14px; color:#fff; font-weight:700;
+         font-size: clamp(.95rem, 3.4vw, 1.15rem); animation: pop .5s both;
+         box-shadow: 0 8px 24px rgba(0,0,0,.18);}
+.b-none {background: linear-gradient(120deg,#1b5e20,#43a047);}
+.b-moderate {background: linear-gradient(120deg,#e65100,#ffa000);}
+.b-high {background: linear-gradient(120deg,#b71c1c,#ef5350);}
+.b-incurable {background: linear-gradient(120deg,#3e0a0a,#8e1b1b);}
+.card {border-radius:16px; padding:14px 18px; margin:8px 0; animation: pop .5s both;
+       background: rgba(128,128,128,.08); border:1px solid rgba(128,128,128,.2);}
+.stat {text-align:center; border-radius:16px; padding:12px; background: rgba(76,175,80,.10);
+       border:1px solid rgba(76,175,80,.3);}
+.stat small {opacity:.7; display:block;} .stat b {font-size:1.2rem;}
+
+.ringwrap {position:relative; width:130px; height:130px; margin: 10px auto 0;}
+.ring {position:absolute; inset:0; border-radius:50%;
+       background: conic-gradient(var(--c) calc(var(--p) * 1%), rgba(128,128,128,.22) 0);
+       -webkit-mask: radial-gradient(farthest-side, transparent 66%, #000 67%);
+               mask: radial-gradient(farthest-side, transparent 66%, #000 67%);}
+.ringtxt {position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center;}
+.ringtxt b {font-size:1.6rem;} .ringtxt small {opacity:.65; margin-top:-2px;}
+
+/* ---- tabs / buttons ---- */
+.stTabs [data-baseweb="tab-list"] {gap: 6px; flex-wrap: wrap;}
+.stTabs [data-baseweb="tab"] {border-radius: 12px; padding: 8px 14px;}
+.stButton > button, .stFormSubmitButton > button {border-radius: 14px; font-weight: 700; width: 100%;
+       border: 0; color:#fff; background: linear-gradient(120deg,#1b8a3a,#7cb342); transition: transform .15s;}
+.stButton > button:hover, .stFormSubmitButton > button:hover {transform: scale(1.02); color:#fff;}
+
+/* ---- login ---- */
+.lock {text-align:center; margin: 6vh auto 10px; max-width: 420px;}
+.lock .icon {font-size: 3.4rem; animation: floaty 5s ease-in-out infinite; display:inline-block;}
+.lock h2 {margin: 4px 0 2px; font-weight: 800;} .lock p {opacity:.7; margin:0;}
+
+.foot {text-align:center; opacity:.6; font-size:.8rem; margin-top:28px;}
+
+/* ---- phones ---- */
+@media (max-width: 640px) {
+  .block-container {padding: .6rem .6rem 2.5rem;}
+  .hero {padding: 26px 14px 22px; border-radius: 20px;}
+  .steps {gap:6px;} .step {font-size:.72rem; padding:10px 4px;} .step b {font-size:1.25rem;}
+  .crops {gap:10px;}
+  .stTabs [data-baseweb="tab"] {padding: 6px 10px; font-size:.85rem;}
+}
+</style>
+"""
+
+HIDE_SIDEBAR = "<style>[data-testid='stSidebar'], [data-testid='stSidebarCollapsedControl'], " \
+               "[data-testid='stExpandSidebarButton'] {display:none !important;}</style>"
+
+TOMATO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+<circle cx="50" cy="56" r="34" fill="#e53935"/><ellipse cx="38" cy="42" rx="9" ry="5" fill="#ff8a80" opacity=".6" transform="rotate(-30 38 42)"/>
+<path d="M50 24 L43 14 L50 19 L57 14 Z M50 24 L33 24 L44 30 Z M50 24 L67 24 L56 30 Z M50 24 L38 34 L48 30 Z M50 24 L62 34 L52 30 Z"
+ fill="#2e7d32"/><rect x="48" y="10" width="4" height="12" rx="2" fill="#1b5e20"/></svg>"""
+
+POTATO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+<path d="M18 58 C14 36 34 22 56 26 C78 30 90 46 82 66 C74 84 40 88 26 76 C21 72 19 66 18 58 Z" fill="#c8923f"/>
+<path d="M30 40 C40 30 58 30 70 38" stroke="#e6b868" stroke-width="4" fill="none" stroke-linecap="round" opacity=".7"/>
+<circle cx="40" cy="58" r="2.6" fill="#8d5a1e"/><circle cx="58" cy="52" r="2.6" fill="#8d5a1e"/>
+<circle cx="66" cy="68" r="2.6" fill="#8d5a1e"/><circle cx="46" cy="72" r="2.6" fill="#8d5a1e"/>
+<circle cx="30" cy="62" r="2.2" fill="#8d5a1e"/></svg>"""
+
+st.markdown(CSS, unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------- password gate
+def get_password() -> str:
+    """Prefer Streamlit secrets (APP_PASSWORD); fall back to the default below."""
+    try:
+        return str(st.secrets["APP_PASSWORD"])
+    except Exception:
+        return "Rajesh444"
+
+
+def check_password() -> bool:
+    if st.session_state.get("auth_ok"):
+        return True
+
+    st.markdown(HIDE_SIDEBAR, unsafe_allow_html=True)
+    st.markdown('<div class="lock"><div class="icon">🔒</div><h2>Private Access</h2>'
+                '<p>Enter the password to open Plant Disease Detection</p></div>',
+                unsafe_allow_html=True)
+
+    _, mid, _ = st.columns([1, 2, 1])
+    with mid:
+        with st.form("login", clear_on_submit=True):
+            pw = st.text_input("Password", type="password", placeholder="Enter password",
+                               label_visibility="collapsed")
+            go = st.form_submit_button("🔓 Unlock")
+        if go:
+            if hmac.compare_digest(pw.encode(), get_password().encode()):
+                st.session_state["auth_ok"] = True
+                st.rerun()
+            else:
+                time.sleep(1)  # slows brute-force guessing
+                st.error("Wrong password. Please try again.")
+    return False
+
+
+if not check_password():
+    st.stop()
 
 
 # --------------------------------------------------------------------------- model
 @st.cache_resource(show_spinner="Loading AI model (downloading if needed)...")
 def load_model():
-    import tensorflow as tf  # imported lazily so the page appears instantly
+    import tensorflow as tf
 
-    # Automatically download model from Google Drive if missing (bypasses GitHub 25MB limit)
     if not MODEL_PATH.exists():
-        st.info("📥 Downloading model from Google Drive (first-time cloud boot, ~89MB)... Please wait.")
         gdrive_url = "https://drive.google.com/uc?id=1wuHFBZs-76upHrPybchq4LZbh8khOTAP&export=download"
         gdown.download(gdrive_url, str(MODEL_PATH), quiet=False)
 
@@ -72,7 +219,7 @@ def predict(image_bytes: bytes, mode: str) -> list:
     return [float(p) for p in probs]
 
 
-# ------------------------------------------------------------------ helpers
+# --------------------------------------------------------------------------- helpers
 def pretty(class_name: str) -> str:
     crop, _, cond = class_name.partition("___")
     crop = crop.replace("_", " ").replace(",", "")
@@ -85,7 +232,6 @@ def crop_of(class_name: str) -> str:
 
 
 def ask_ollama(question: str, context: str, model_name: str, host: str) -> str:
-    """Free, open-source LLM running locally via Ollama (https://ollama.com)."""
     payload = json.dumps({
         "model": model_name,
         "stream": False,
@@ -105,50 +251,7 @@ def bullets(items):
         st.markdown(f"- {item}")
 
 
-
-# ------------------------------------------------------------------ styling
-CSS = """
-<style>
-#MainMenu, footer {visibility: hidden;}
-.block-container {padding-top: 1.5rem; max-width: 820px;}
-.hero {background: linear-gradient(135deg, #1b5e20 0%, #43a047 100%); color: #fff;
-       border-radius: 20px; padding: 28px 24px 22px; text-align: center; margin-bottom: 18px;}
-.hero h1 {color: #fff; margin: 0; font-size: 2.1rem; font-weight: 800; letter-spacing: .3px;}
-.hero p {color: #e8f5e9; margin: 6px 0 0; font-size: 1.02rem;}
-.crops {display: flex; gap: 14px; margin-bottom: 20px;}
-.crop {flex: 1; border-radius: 16px; padding: 14px 10px 12px; text-align: center;
-       background: rgba(76,175,80,.10); border: 1px solid rgba(76,175,80,.35);}
-.crop svg, .crop img {width: 96px; height: 96px; object-fit: cover; border-radius: 14px;}
-.crop b {display: block; margin-top: 6px; font-size: 1.05rem;}
-.crop span {font-size: .85rem; opacity: .75;}
-.banner {border-radius: 14px; padding: 14px 18px; margin: 10px 0 14px; color: #fff;
-         font-weight: 700; font-size: 1.1rem;}
-.b-none {background: #2e7d32;} .b-moderate {background: #ef8f00;}
-.b-high {background: #d32f2f;} .b-incurable {background: #7f1d1d;}
-.card {border-radius: 14px; padding: 14px 18px; margin: 8px 0;
-       background: rgba(128,128,128,.08); border: 1px solid rgba(128,128,128,.2);}
-.stat {text-align: center; border-radius: 14px; padding: 12px;
-       background: rgba(76,175,80,.10); border: 1px solid rgba(76,175,80,.3);}
-.stat small {opacity: .7; display: block;} .stat b {font-size: 1.25rem;}
-.foot {text-align: center; opacity: .6; font-size: .8rem; margin-top: 28px;}
-</style>
-"""
-
-TOMATO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-<circle cx="50" cy="56" r="34" fill="#e53935"/><ellipse cx="38" cy="42" rx="9" ry="5" fill="#ff8a80" opacity=".6" transform="rotate(-30 38 42)"/>
-<path d="M50 24 L43 14 L50 19 L57 14 Z M50 24 L33 24 L44 30 Z M50 24 L67 24 L56 30 Z M50 24 L38 34 L48 30 Z M50 24 L62 34 L52 30 Z"
- fill="#2e7d32"/><rect x="48" y="10" width="4" height="12" rx="2" fill="#1b5e20"/></svg>"""
-
-POTATO_SVG = """<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
-<path d="M18 58 C14 36 34 22 56 26 C78 30 90 46 82 66 C74 84 40 88 26 76 C21 72 19 66 18 58 Z" fill="#c8923f"/>
-<path d="M30 40 C40 30 58 30 70 38" stroke="#e6b868" stroke-width="4" fill="none" stroke-linecap="round" opacity=".7"/>
-<circle cx="40" cy="58" r="2.6" fill="#8d5a1e"/><circle cx="58" cy="52" r="2.6" fill="#8d5a1e"/>
-<circle cx="66" cy="68" r="2.6" fill="#8d5a1e"/><circle cx="46" cy="72" r="2.6" fill="#8d5a1e"/>
-<circle cx="30" cy="62" r="2.2" fill="#8d5a1e"/></svg>"""
-
-
 def crop_visual(name: str, svg: str) -> str:
-    """Use your own photo from images/<name>.jpg|png|webp if present, else the built-in drawing."""
     for ext in ("jpg", "jpeg", "png", "webp"):
         p = BASE_DIR / "images" / f"{name}.{ext}"
         if p.exists():
@@ -158,10 +261,15 @@ def crop_visual(name: str, svg: str) -> str:
 
 
 def hero_and_crops():
-    st.markdown(CSS, unsafe_allow_html=True)
     st.markdown(
-        '<div class="hero"><h1>🌿 Plant Disease Detection</h1>'
-        '<p>Upload a leaf photo and get an instant diagnosis with treatment advice</p></div>',
+        '<div class="hero"><span class="leaf l1">🍃</span><span class="leaf l2">🌿</span>'
+        '<span class="leaf l3">🍀</span><h1>🌿 Plant Disease Detection</h1>'
+        '<p>Snap or upload a leaf photo and get an instant AI diagnosis with treatment advice</p></div>',
+        unsafe_allow_html=True)
+    st.markdown(
+        '<div class="steps"><div class="step"><b>📸</b>1. Add leaf photo</div>'
+        '<div class="step"><b>🧠</b>2. AI analyses it</div>'
+        '<div class="step"><b>💊</b>3. Get treatment plan</div></div>',
         unsafe_allow_html=True)
     st.markdown(
         f'<div class="crops">'
@@ -169,7 +277,12 @@ def hero_and_crops():
         f'<div class="crop">{crop_visual("potato", POTATO_SVG)}<b>Potato</b><span>2 diseases + healthy</span></div>'
         f'</div>', unsafe_allow_html=True)
 
-# ------------------------------------------------------------------ sidebar
+
+def conf_color(c: float) -> str:
+    return "#43a047" if c >= 0.85 else "#ffa000" if c >= 0.65 else "#e53935"
+
+
+# --------------------------------------------------------------------------- sidebar
 with st.sidebar:
     st.header("⚙️ Settings")
     threshold = st.slider("Minimum confidence", 40, 95, 70, 5, format="%d%%") / 100
@@ -182,10 +295,14 @@ with st.sidebar:
     if use_llm:
         llm_model = st.text_input("Ollama model", "llama3.2")
         llm_host = st.text_input("Ollama address", "http://localhost:11434")
+    st.divider()
+    if st.button("🚪 Log out"):
+        st.session_state["auth_ok"] = False
+        st.rerun()
 
 mode = PREPROCESS_MODES[mode_label]
 
-# ------------------------------------------------------------------ main page
+# --------------------------------------------------------------------------- main page
 hero_and_crops()
 
 tab_up, tab_cam = st.tabs(["📁 Upload photo", "📷 Use camera"])
@@ -210,7 +327,7 @@ except Exception:
     st.stop()
 
 try:
-    with st.spinner("Analysing leaf..."):
+    with st.spinner("🔬 Analysing leaf..."):
         probs = predict(image_bytes, mode)
 except Exception as exc:
     st.error("The model could not run. This is usually a TensorFlow/Keras version mismatch.")
@@ -230,17 +347,18 @@ info = DISEASE_INFO.get(best_name)
 
 col_img, col_res = st.columns([1, 1.2], gap="large")
 with col_img:
-    st.image(image, caption="Your leaf")
+    st.image(image, caption="Your leaf", use_container_width=True)
 with col_res:
     st.markdown(f'<div class="stat"><small>Prediction</small><b>{pretty(best_name)}</b></div>',
                 unsafe_allow_html=True)
-    st.markdown(f'<div class="stat" style="margin-top:10px"><small>Confidence</small>'
-                f'<b>{conf:.1%}</b></div>', unsafe_allow_html=True)
-    st.progress(min(max(conf, 0.0), 1.0))
+    st.markdown(
+        f'<div class="ringwrap"><div class="ring" style="--p:{conf*100:.1f}; --c:{conf_color(conf)}"></div>'
+        f'<div class="ringtxt"><b>{conf:.0%}</b><small>confidence</small></div></div>',
+        unsafe_allow_html=True)
 
 top = pd.DataFrame({"Class": [pretty(CLASS_NAMES[i]) for i in order[:3]],
                     "Probability": [probs[i] for i in order[:3]]}).set_index("Class")
-with st.expander("Top 3 possibilities"):
+with st.expander("📊 Top 3 possibilities"):
     st.bar_chart(top, horizontal=True)
 
 if crop_of(best_name) not in SUPPORTED_CROPS:
@@ -261,7 +379,7 @@ label = {"none": "✅ Healthy leaf - no treatment needed",
 st.markdown(f'<div class="banner b-{severity}">{label}</div>', unsafe_allow_html=True)
 st.markdown(f'<div class="card"><b>What it is</b><br>{info["cause"]}</div>', unsafe_allow_html=True)
 
-t_sym, t_treat, t_prev = st.tabs(["🔍 Symptoms", "💊 Treatment & Remedies", "🛡️ Prevention"])
+t_sym, t_treat, t_prev = st.tabs(["🔍 Symptoms", "💊 Treatment", "🛡️ Prevention"])
 with t_sym:
     bullets(info["symptoms"])
 with t_treat:
@@ -270,8 +388,11 @@ with t_treat:
     if info["chemical"]:
         st.markdown("💊 **Commercial Treatment & Dosages**")
         bullets(info["chemical"])
-        st.markdown("🛒 **Local Store / Online Search Tip:** Search the medicine name above on agricultural supply stores or delivery apps (like Coupang or local garden supply centers) to find available brands easily.")
-        st.caption("Always follow the product label for exact safety precautions, mixing ratios, and local agricultural regulations.")
+        st.markdown("🛒 **Local Store / Online Search Tip:** Search the medicine name above on agricultural "
+                    "supply stores or delivery apps (like Coupang or local garden supply centers) to find "
+                    "available brands easily.")
+        st.caption("Always follow the product label for exact safety precautions, mixing ratios, "
+                   "and local agricultural regulations.")
 with t_prev:
     bullets(info["prevention"])
 
