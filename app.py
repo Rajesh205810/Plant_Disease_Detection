@@ -47,10 +47,10 @@ if "current_diagnosis" not in st.session_state:
 if "show_welcome_popup" not in st.session_state:
     st.session_state.show_welcome_popup = True
 
-# --------------------------------------------------------------------------- CSS Styling (Hidden GitHub, Code, & Toolbar UI)
+# --------------------------------------------------------------------------- CSS Styling
 CSS = """
 <style>
-/* ---- Hide Streamlit Toolbar, Edit Code, GitHub links, and Footer ---- */
+/* ---- Hide Streamlit Toolbar, Edit Code, and Footer ---- */
 #MainMenu, footer, header [data-testid="stToolbar"], [data-testid="stToolbar"],
 [data-testid="stDeployButton"], [data-testid="stAppDeployButton"],
 [data-testid="stDecoration"], [data-testid="stStatusWidget"],
