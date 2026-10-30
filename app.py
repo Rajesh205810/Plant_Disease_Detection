@@ -85,11 +85,20 @@ CSS = """
        background: rgba(76,175,80,.10); border:1px solid rgba(76,175,80,.30); animation: pop .6s both;}
 .step b {display:block; font-size:1.5rem;}
 
+/* ---- Crop Cards with Hover Highlighting Animation ---- */
 .crops {display:grid; grid-template-columns: 1fr 1fr; gap:14px; margin-bottom:20px;}
-.crop {border-radius:20px; padding:16px 10px 14px; text-align:center; transition: transform .25s;
+.crop {border-radius:20px; padding:16px 10px 14px; text-align:center; 
+       transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease, background 0.3s ease;
        background: linear-gradient(160deg, rgba(76,175,80,.16), rgba(76,175,80,.04));
-       border:1px solid rgba(76,175,80,.35); backdrop-filter: blur(6px);}
-.crop svg, .crop img {width: min(96px, 24vw); height: min(96px, 24vw); object-fit: cover; border-radius: 16px;}
+       border:1px solid rgba(76,175,80,.35); backdrop-filter: blur(6px); cursor: pointer;}
+.crop:hover {
+    transform: translateY(-6px) scale(1.02);
+    box-shadow: 0 12px 30px rgba(76,175,80,.35);
+    border-color: #4caf50;
+    background: linear-gradient(160deg, rgba(76,175,80,.26), rgba(76,175,80,.1));
+}
+.crop svg, .crop img {width: min(96px, 24vw); height: min(96px, 24vw); object-fit: cover; border-radius: 16px; transition: transform 0.3s ease;}
+.crop:hover svg, .crop:hover img {transform: scale(1.08);}
 .crop b {display:block; margin-top:8px; font-size:1.05rem;}
 .crop span {font-size:.82rem; opacity:.75;}
 
