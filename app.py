@@ -47,10 +47,17 @@ if "current_diagnosis" not in st.session_state:
 if "show_welcome_popup" not in st.session_state:
     st.session_state.show_welcome_popup = True
 
-# --------------------------------------------------------------------------- CSS Styling
+# --------------------------------------------------------------------------- CSS Styling (Hidden GitHub, Code, & Toolbar UI)
 CSS = """
 <style>
-#MainMenu, footer {visibility: hidden;}
+/* ---- Hide Streamlit Toolbar, Edit Code, GitHub links, and Footer ---- */
+#MainMenu, footer, header [data-testid="stToolbar"], [data-testid="stToolbar"],
+[data-testid="stDeployButton"], [data-testid="stAppDeployButton"],
+[data-testid="stDecoration"], [data-testid="stStatusWidget"],
+.stDeployButton, .viewerBadge_container__r5tak, [class*="viewerBadge"],
+a[href*="github.com"][target="_blank"], a[href*="github.com"] {display: none !important; visibility: hidden !important;}
+header[data-testid="stHeader"] {background: transparent !important;}
+
 .block-container {padding: 1.2rem 1rem 3rem; max-width: 880px;}
 @keyframes flow {0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%}}
 @keyframes floaty {0%,100%{transform:translateY(0) rotate(-6deg)} 50%{transform:translateY(-10px) rotate(6deg)}}
